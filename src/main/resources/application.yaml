@@ -1,0 +1,8 @@
+spring:
+  application:
+    name: gate
+  cloud:
+    # 禁用 RefreshScope - Spring Cloud RefreshScope 不支援 AOT/Native Image
+    # 參考: https://github.com/spring-cloud/spring-cloud-release/wiki/AOT-transformations-and-native-image-support
+    refresh:
+      enabled: false
