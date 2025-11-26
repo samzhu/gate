@@ -42,12 +42,15 @@ spring:
           jwk-set-uri: https://localhost/.well-known/jwks.json
 
 # Anthropic API 配置
-# 部署時透過環境變數覆蓋: anthropic.api.base-url, anthropic.api.keys
+# 部署時透過環境變數覆蓋: anthropic.api.base-url, anthropic.api.keys[n].alias/value
 anthropic:
   api:
     base-url: https://api.anthropic.com
-    # 多個 API Key (Round Robin 輪換)，逗號分隔
-    keys:
+    # API Keys 配置 (Round Robin 輪換)
+    # 每個 key 包含 alias (人類可讀別名) 和 value (實際 API Key)
+    # 本地開發: 在 config/application-secrets.yaml 中配置
+    # 部署環境: 使用環境變數 anthropic.api.keys[0].alias, anthropic.api.keys[0].value 等
+    keys: []
 
 # Resilience4j 配置
 resilience4j:

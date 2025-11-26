@@ -126,4 +126,31 @@ public record StreamEvent(
         }
         return 0;
     }
+
+    /**
+     * 從 message_start 事件取得 message id
+     */
+    public String getMessageId() {
+        if (isMessageStart() && message != null) {
+            return message.id();
+        }
+        return null;
+    }
+
+    /**
+     * 從 message_delta 事件取得 stop_reason
+     */
+    public String getStopReason() {
+        if (isMessageDelta() && delta != null) {
+            return delta.stopReason();
+        }
+        return null;
+    }
+
+    /**
+     * 是否為 error 事件
+     */
+    public boolean isError() {
+        return "error".equals(type);
+    }
 }

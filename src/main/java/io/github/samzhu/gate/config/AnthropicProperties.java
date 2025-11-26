@@ -10,7 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "anthropic.api")
 public record AnthropicProperties(
     String baseUrl,
-    List<String> keys
+    List<ApiKeyConfig> keys
 ) {
     public AnthropicProperties {
         if (baseUrl == null || baseUrl.isBlank()) {

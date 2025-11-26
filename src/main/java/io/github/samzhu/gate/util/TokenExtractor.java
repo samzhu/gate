@@ -17,6 +17,8 @@ public class TokenExtractor {
     private final AtomicInteger cacheCreationTokens = new AtomicInteger(0);
     private final AtomicInteger cacheReadTokens = new AtomicInteger(0);
     private final AtomicReference<String> model = new AtomicReference<>();
+    private final AtomicReference<String> messageId = new AtomicReference<>();
+    private final AtomicReference<String> stopReason = new AtomicReference<>();
     private final long startTime;
 
     public TokenExtractor() {
@@ -34,7 +36,7 @@ public class TokenExtractor {
         }
 
         if (event.isMessageStart()) {
-            // 從 message_start 提取 input_tokens 和 model
+            // 從 message_start 提取 input_tokens, model, message_id
             inputTokens.set(event.getInputTokens());
             cacheCreationTokens.set(event.getCacheCreationTokens());
             cacheReadTokens.set(event.getCacheReadTokens());
@@ -42,11 +44,19 @@ public class TokenExtractor {
             if (eventModel != null) {
                 model.set(eventModel);
             }
+            String eventMessageId = event.getMessageId();
+            if (eventMessageId != null) {
+                messageId.set(eventMessageId);
+            }
         } else if (event.isMessageDelta()) {
-            // 從 message_delta 提取最終 output_tokens
+            // 從 message_delta 提取最終 output_tokens 和 stop_reason
             int tokens = event.getOutputTokens();
             if (tokens > 0) {
                 outputTokens.set(tokens);
+            }
+            String eventStopReason = event.getStopReason();
+            if (eventStopReason != null) {
+                stopReason.set(eventStopReason);
             }
         }
     }
@@ -55,19 +65,35 @@ public class TokenExtractor {
      * 建立用量事件資料
      *
      * @param status 請求狀態 (success/error)
+     * @param keyAlias API Key 別名
+     * @param traceId OpenTelemetry Trace ID
      * @return 用量事件資料
      */
-    public UsageEventData buildUsageEventData(String status) {
+    public UsageEventData buildUsageEventData(String status, String keyAlias, String traceId) {
         return UsageEventData.builder()
             .model(model.get())
             .inputTokens(inputTokens.get())
             .outputTokens(outputTokens.get())
             .cacheCreationTokens(cacheCreationTokens.get())
             .cacheReadTokens(cacheReadTokens.get())
+            .messageId(messageId.get())
             .latencyMs(System.currentTimeMillis() - startTime)
             .stream(true)
+            .stopReason(stopReason.get())
             .status(status)
+            .keyAlias(keyAlias)
+            .traceId(traceId)
             .build();
+    }
+
+    /**
+     * 建立用量事件資料 (簡化版，向下相容)
+     *
+     * @param status 請求狀態 (success/error)
+     * @return 用量事件資料
+     */
+    public UsageEventData buildUsageEventData(String status) {
+        return buildUsageEventData(status, null, null);
     }
 
     public int getInputTokens() {
@@ -80,6 +106,14 @@ public class TokenExtractor {
 
     public String getModel() {
         return model.get();
+    }
+
+    public String getMessageId() {
+        return messageId.get();
+    }
+
+    public String getStopReason() {
+        return stopReason.get();
     }
 
     public long getLatencyMs() {

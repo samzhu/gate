@@ -9,27 +9,24 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.servlet.function.ServerResponse;
 
+import io.micrometer.tracing.Tracer;
 import tools.jackson.databind.ObjectMapper;
 
 import io.github.samzhu.gate.config.AnthropicProperties;
 import io.github.samzhu.gate.model.UsageEventData;
-import io.github.samzhu.gate.service.ApiKeyRotationService;
 import io.github.samzhu.gate.service.UsageEventPublisher;
 import io.github.samzhu.gate.util.SseParser;
 import io.github.samzhu.gate.util.TokenExtractor;
 
 /**
  * 串流代理處理器
- * 使用 Web MVC SseEmitter 處理 Claude API 串流回應
+ * 使用 Spring Web MVC ServerResponse.sse() 處理 Claude API 串流回應
  */
 @Component
 public class StreamingProxyHandler {
@@ -37,54 +34,51 @@ public class StreamingProxyHandler {
     private static final Logger log = LoggerFactory.getLogger(StreamingProxyHandler.class);
 
     private final AnthropicProperties anthropicProperties;
-    private final ApiKeyRotationService apiKeyRotationService;
     private final UsageEventPublisher usageEventPublisher;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
-    private final ExecutorService executor;
+    private final Tracer tracer;
 
     public StreamingProxyHandler(
             AnthropicProperties anthropicProperties,
-            ApiKeyRotationService apiKeyRotationService,
             UsageEventPublisher usageEventPublisher,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            Tracer tracer) {
         this.anthropicProperties = anthropicProperties;
-        this.apiKeyRotationService = apiKeyRotationService;
         this.usageEventPublisher = usageEventPublisher;
         this.objectMapper = objectMapper;
+        this.tracer = tracer;
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .build();
-        this.executor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     /**
-     * 處理串流請求
+     * 處理串流請求，返回 ServerResponse
      *
      * @param requestBody 請求體
+     * @param apiKey      Anthropic API Key
      * @param subject     用戶識別碼
      * @param requestId   請求 ID
-     * @return SseEmitter
+     * @param keyAlias    API Key 別名
+     * @return ServerResponse with SSE
      */
-    public SseEmitter handleStreaming(String requestBody, String subject, String requestId) {
-        // 10 分鐘超時
-        SseEmitter emitter = new SseEmitter(600_000L);
-
-        String apiKey = apiKeyRotationService.getNextApiKey();
+    public ServerResponse handleStreaming(String requestBody, String apiKey, String subject,
+                                           String requestId, String keyAlias) {
         if (apiKey == null) {
-            emitter.completeWithError(new IllegalStateException("No API key available"));
-            return emitter;
+            return ServerResponse.status(500)
+                .body("{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"No API key available\"}}");
         }
 
-        CompletableFuture.runAsync(() -> {
-            processStream(emitter, requestBody, apiKey, subject, requestId);
-        }, executor);
+        String traceId = getCurrentTraceId();
 
-        return emitter;
+        return ServerResponse.sse(sseBuilder -> {
+            processStream(sseBuilder, requestBody, apiKey, subject, requestId, keyAlias, traceId);
+        });
     }
 
-    private void processStream(SseEmitter emitter, String requestBody, String apiKey,
-                               String subject, String requestId) {
+    private void processStream(ServerResponse.SseBuilder sseBuilder, String requestBody, String apiKey,
+                               String subject, String requestId, String keyAlias, String traceId) {
         TokenExtractor tokenExtractor = new TokenExtractor();
         SseParser sseParser = new SseParser(objectMapper);
         String status = "success";
@@ -108,9 +102,10 @@ public class StreamingProxyHandler {
             if (response.statusCode() != 200) {
                 String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
                 log.error("Upstream error: status={}, body={}", response.statusCode(), errorBody);
-                emitter.send(SseEmitter.event().data(errorBody));
-                emitter.complete();
+                sseBuilder.data(errorBody);
+                sseBuilder.complete();
                 status = "error";
+                publishUsageEvent(tokenExtractor, status, keyAlias, traceId, requestId, subject);
                 return;
             }
 
@@ -137,12 +132,11 @@ public class StreamingProxyHandler {
                             }
 
                             // 轉發原始事件給客戶端
-                            if (currentEventType != null) {
-                                emitter.send(SseEmitter.event()
-                                    .name(currentEventType)
-                                    .data(dataContent != null ? dataContent : eventData));
+                            if (currentEventType != null && dataContent != null) {
+                                sseBuilder.event(currentEventType);
+                                sseBuilder.data(dataContent);
                             } else if (dataContent != null) {
-                                emitter.send(SseEmitter.event().data(dataContent));
+                                sseBuilder.data(dataContent);
                             }
 
                             eventBuilder.setLength(0);
@@ -161,35 +155,57 @@ public class StreamingProxyHandler {
                     }
                 }
 
-                emitter.complete();
+                sseBuilder.complete();
             }
         } catch (IOException e) {
             log.error("IO error during streaming: {}", e.getMessage(), e);
             status = "error";
             try {
-                emitter.completeWithError(e);
+                sseBuilder.error(e);
             } catch (Exception ignored) {}
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Streaming interrupted: {}", e.getMessage());
             status = "error";
             try {
-                emitter.completeWithError(e);
+                sseBuilder.error(e);
             } catch (Exception ignored) {}
         } catch (Exception e) {
             log.error("Unexpected error during streaming: {}", e.getMessage(), e);
             status = "error";
             try {
-                emitter.completeWithError(e);
+                sseBuilder.error(e);
             } catch (Exception ignored) {}
         } finally {
-            // 發送用量事件
-            UsageEventData eventData = tokenExtractor.buildUsageEventData(status);
-            usageEventPublisher.publish(eventData, requestId, subject);
-
-            log.debug("Stream completed: subject={}, requestId={}, inputTokens={}, outputTokens={}, latencyMs={}",
-                subject, requestId, tokenExtractor.getInputTokens(),
-                tokenExtractor.getOutputTokens(), tokenExtractor.getLatencyMs());
+            publishUsageEvent(tokenExtractor, status, keyAlias, traceId, requestId, subject);
         }
+    }
+
+    private void publishUsageEvent(TokenExtractor tokenExtractor, String status,
+                                    String keyAlias, String traceId,
+                                    String requestId, String subject) {
+        UsageEventData eventData = tokenExtractor.buildUsageEventData(status, keyAlias, traceId);
+        usageEventPublisher.publish(eventData, requestId, subject);
+
+        log.debug("Stream completed: subject={}, requestId={}, keyAlias={}, traceId={}, " +
+            "inputTokens={}, outputTokens={}, latencyMs={}",
+            subject, requestId, keyAlias, traceId,
+            tokenExtractor.getInputTokens(),
+            tokenExtractor.getOutputTokens(), tokenExtractor.getLatencyMs());
+    }
+
+    /**
+     * 取得當前 OpenTelemetry Trace ID
+     */
+    private String getCurrentTraceId() {
+        try {
+            var currentSpan = tracer.currentSpan();
+            if (currentSpan != null && currentSpan.context() != null) {
+                return currentSpan.context().traceId();
+            }
+        } catch (Exception e) {
+            log.debug("Failed to get trace ID: {}", e.getMessage());
+        }
+        return null;
     }
 }

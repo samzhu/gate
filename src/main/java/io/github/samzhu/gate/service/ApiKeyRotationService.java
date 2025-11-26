@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import io.github.samzhu.gate.config.AnthropicProperties;
+import io.github.samzhu.gate.config.ApiKeyConfig;
 
 /**
  * API Key 輪換服務
@@ -18,29 +19,32 @@ public class ApiKeyRotationService {
 
     private static final Logger log = LoggerFactory.getLogger(ApiKeyRotationService.class);
 
-    private final List<String> apiKeys;
+    private final List<ApiKeyConfig> apiKeys;
     private final AtomicInteger counter = new AtomicInteger(0);
 
     public ApiKeyRotationService(AnthropicProperties properties) {
         this.apiKeys = properties.keys();
         if (apiKeys == null || apiKeys.isEmpty()) {
-            log.warn("No Anthropic API keys configured. Please set ANTHROPIC_API_KEYS environment variable.");
+            log.warn("No Anthropic API keys configured. Please configure anthropic.api.keys in application.yaml");
         } else {
-            log.info("Loaded {} Anthropic API key(s)", apiKeys.size());
+            log.info("Loaded {} Anthropic API key(s): {}",
+                apiKeys.size(),
+                apiKeys.stream().map(ApiKeyConfig::alias).toList());
         }
     }
 
     /**
-     * Round Robin 策略取得下一個 API Key
+     * Round Robin 策略取得下一個 API Key 及其 alias
      *
-     * @return API Key，若無配置則返回 null
+     * @return ApiKeySelection 包含 key 和 alias，若無配置則返回 null
      */
-    public String getNextApiKey() {
+    public ApiKeySelection getNextApiKey() {
         if (apiKeys == null || apiKeys.isEmpty()) {
             return null;
         }
         int index = Math.abs(counter.getAndIncrement() % apiKeys.size());
-        return apiKeys.get(index);
+        ApiKeyConfig config = apiKeys.get(index);
+        return new ApiKeySelection(config.value(), config.alias());
     }
 
     /**
