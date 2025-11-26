@@ -81,19 +81,13 @@ management:
       enabled: true
     readinessstate:
       enabled: true
-  # OpenTelemetry 配置
+  # OpenTelemetry 配置 (Spring Boot 4.0)
   # 取樣率由環境 profile 控制 (lab=1.0, prod=0.1)
-  # 部署時設定業界標準環境變數: OTEL_EXPORTER_OTLP_ENDPOINT
-  # Spring Boot 會自動讀取 OTel 標準環境變數
+  # 本地開發: Docker Compose 自動偵測 grafana-lgtm 容器並配置 OTLP 端點
+  # 部署環境: 設定業界標準環境變數 OTEL_EXPORTER_OTLP_ENDPOINT
   tracing:
     sampling:
       probability: 1.0
-  otlp:
-    tracing:
-      endpoint: http://localhost:4318/v1/traces
-    metrics:
-      export:
-        url: http://localhost:4318/v1/metrics
 
 # 日誌配置 (預設開發模式，生產環境由 profile 覆蓋)
 logging:

@@ -77,12 +77,11 @@ public class StreamingProxyHandler {
      * @param requestBody 請求體
      * @param apiKey      Anthropic API Key
      * @param subject     用戶識別碼
-     * @param requestId   請求 ID
      * @param keyAlias    API Key 別名
      * @return ServerResponse with SSE
      */
     public ServerResponse handleStreaming(String requestBody, String apiKey, String subject,
-                                           String requestId, String keyAlias) {
+                                           String keyAlias) {
         if (apiKey == null) {
             return ServerResponse.status(500)
                 .body("{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"No API key available\"}}");
@@ -91,15 +90,16 @@ public class StreamingProxyHandler {
         String traceId = getCurrentTraceId();
 
         return ServerResponse.sse(sseBuilder -> {
-            processStream(sseBuilder, requestBody, apiKey, subject, requestId, keyAlias, traceId);
+            processStream(sseBuilder, requestBody, apiKey, subject, keyAlias, traceId);
         });
     }
 
     private void processStream(ServerResponse.SseBuilder sseBuilder, String requestBody, String apiKey,
-                               String subject, String requestId, String keyAlias, String traceId) {
+                               String subject, String keyAlias, String traceId) {
         TokenExtractor tokenExtractor = new TokenExtractor();
         SseParser sseParser = new SseParser(objectMapper);
         String status = "success";
+        String anthropicRequestId = null;
 
         try {
             URI uri = URI.create(anthropicProperties.baseUrl() + "/v1/messages");
@@ -117,13 +117,19 @@ public class StreamingProxyHandler {
                 HttpResponse.BodyHandlers.ofInputStream()
             );
 
+            // 從回應 header 提取 Anthropic request-id
+            anthropicRequestId = response.headers()
+                .firstValue("request-id")
+                .orElse(null);
+
             if (response.statusCode() != 200) {
                 String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
-                log.error("Upstream error: status={}, body={}", response.statusCode(), errorBody);
+                log.error("Upstream error: status={}, body={}, anthropicRequestId={}",
+                    response.statusCode(), errorBody, anthropicRequestId);
                 sseBuilder.data(errorBody);
                 sseBuilder.complete();
                 status = "error";
-                publishUsageEvent(tokenExtractor, status, keyAlias, traceId, requestId, subject);
+                publishUsageEvent(tokenExtractor, status, keyAlias, traceId, anthropicRequestId, subject);
                 return;
             }
 
@@ -195,19 +201,19 @@ public class StreamingProxyHandler {
                 sseBuilder.error(e);
             } catch (Exception ignored) {}
         } finally {
-            publishUsageEvent(tokenExtractor, status, keyAlias, traceId, requestId, subject);
+            publishUsageEvent(tokenExtractor, status, keyAlias, traceId, anthropicRequestId, subject);
         }
     }
 
     private void publishUsageEvent(TokenExtractor tokenExtractor, String status,
                                     String keyAlias, String traceId,
-                                    String requestId, String subject) {
-        UsageEventData eventData = tokenExtractor.buildUsageEventData(status, keyAlias, traceId);
-        usageEventPublisher.publish(eventData, requestId, subject);
+                                    String anthropicRequestId, String subject) {
+        UsageEventData eventData = tokenExtractor.buildUsageEventData(status, keyAlias, traceId, anthropicRequestId);
+        usageEventPublisher.publish(eventData, subject);
 
-        log.debug("Stream completed: subject={}, requestId={}, keyAlias={}, traceId={}, " +
+        log.debug("Stream completed: subject={}, keyAlias={}, traceId={}, anthropicRequestId={}, " +
             "inputTokens={}, outputTokens={}, latencyMs={}",
-            subject, requestId, keyAlias, traceId,
+            subject, keyAlias, traceId, anthropicRequestId,
             tokenExtractor.getInputTokens(),
             tokenExtractor.getOutputTokens(), tokenExtractor.getLatencyMs());
     }

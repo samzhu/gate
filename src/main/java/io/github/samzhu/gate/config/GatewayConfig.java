@@ -1,7 +1,5 @@
 package io.github.samzhu.gate.config;
 
-import java.util.UUID;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
@@ -88,24 +86,23 @@ public class GatewayConfig {
 
             // 從 JWT 取得 subject
             String subject = getSubjectFromRequest(request);
-            String requestId = UUID.randomUUID().toString();
             String keyAlias = selection.alias();
             String apiKey = selection.key();
 
             // 判斷是否為串流請求
             boolean isStreaming = isStreamingRequest(requestBody);
 
-            log.debug("Routing request: subject={}, requestId={}, keyAlias={}, streaming={}",
-                subject, requestId, keyAlias, isStreaming);
+            log.debug("Routing request: subject={}, keyAlias={}, streaming={}",
+                subject, keyAlias, isStreaming);
 
             if (isStreaming) {
                 // 串流請求 - 使用 ServerResponse.sse()
                 return streamingProxyHandler.handleStreaming(
-                    requestBody, apiKey, subject, requestId, keyAlias);
+                    requestBody, apiKey, subject, keyAlias);
             } else {
                 // 非串流請求 - 返回 JSON 回應
                 return nonStreamingProxyHandler.handleNonStreaming(
-                    requestBody, apiKey, subject, requestId, keyAlias);
+                    requestBody, apiKey, subject, keyAlias);
             }
         } catch (Exception e) {
             log.error("Error handling messages request: {}", e.getMessage(), e);

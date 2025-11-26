@@ -7,6 +7,12 @@
 # GCP 配置說明:
 #   - project-id: 自動從 GCP 環境取得，無需手動設定
 #   - Topic 名稱: 程式固定使用 llm-gateway-usage
+#
+# 可觀測性說明 (OpenTelemetry Collector Sidecar):
+#   - Cloud Run 部署 OTel Collector 作為 Sidecar 容器
+#   - 應用程式發送 OTLP 到 localhost:4317 (gRPC) 或 localhost:4318 (HTTP)
+#   - Collector 自動導出到 Cloud Trace / Cloud Monitoring / Cloud Logging
+#   - 參考: https://cloud.google.com/stackdriver/docs/instrumentation/opentelemetry-collector-cloud-run
 # =============================================================================
 
 spring:
@@ -18,3 +24,20 @@ spring:
       binders:
         pubsub:
           type: pubsub
+
+# GCP 環境 OTLP 配置
+# 發送到 Sidecar Collector (localhost)，由 Collector 導出到 GCP 服務
+management:
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  otlp:
+    metrics:
+      export:
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics

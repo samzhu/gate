@@ -36,7 +36,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *   <li><b>運維資訊</b>
  *       <ul>
  *         <li>{@code keyAlias} - 使用的 API Key 別名</li>
- *         <li>{@code traceId} - OpenTelemetry Trace ID</li>
+ *         <li>{@code traceId} - OpenTelemetry Trace ID（用於端到端追蹤）</li>
+ *         <li>{@code anthropicRequestId} - Anthropic 回應的 request-id（req_xxx，用於向 Anthropic 客服報告問題）</li>
  *       </ul>
  *   </li>
  * </ul>
@@ -86,7 +87,10 @@ public record UsageEventData(
     String keyAlias,
 
     @JsonProperty("trace_id")
-    String traceId
+    String traceId,
+
+    @JsonProperty("anthropic_request_id")
+    String anthropicRequestId
 ) {
     public static Builder builder() {
         return new Builder();
@@ -106,6 +110,7 @@ public record UsageEventData(
         private String errorType;
         private String keyAlias;
         private String traceId;
+        private String anthropicRequestId;
 
         public Builder model(String model) {
             this.model = model;
@@ -172,13 +177,18 @@ public record UsageEventData(
             return this;
         }
 
+        public Builder anthropicRequestId(String anthropicRequestId) {
+            this.anthropicRequestId = anthropicRequestId;
+            return this;
+        }
+
         public UsageEventData build() {
             int totalTokens = inputTokens + outputTokens;
             return new UsageEventData(
                 model, inputTokens, outputTokens,
                 cacheCreationTokens, cacheReadTokens, totalTokens,
                 messageId, latencyMs, stream, stopReason,
-                status, errorType, keyAlias, traceId
+                status, errorType, keyAlias, traceId, anthropicRequestId
             );
         }
     }

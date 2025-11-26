@@ -91,9 +91,11 @@ public class TokenExtractor {
      * @param status 請求狀態 (success/error)
      * @param keyAlias API Key 別名
      * @param traceId OpenTelemetry Trace ID
+     * @param anthropicRequestId Anthropic 回應的 request-id header
      * @return 用量事件資料
      */
-    public UsageEventData buildUsageEventData(String status, String keyAlias, String traceId) {
+    public UsageEventData buildUsageEventData(String status, String keyAlias, String traceId,
+                                               String anthropicRequestId) {
         return UsageEventData.builder()
             .model(model.get())
             .inputTokens(inputTokens.get())
@@ -107,6 +109,7 @@ public class TokenExtractor {
             .status(status)
             .keyAlias(keyAlias)
             .traceId(traceId)
+            .anthropicRequestId(anthropicRequestId)
             .build();
     }
 
@@ -117,7 +120,7 @@ public class TokenExtractor {
      * @return 用量事件資料
      */
     public UsageEventData buildUsageEventData(String status) {
-        return buildUsageEventData(status, null, null);
+        return buildUsageEventData(status, null, null, null);
     }
 
     public int getInputTokens() {

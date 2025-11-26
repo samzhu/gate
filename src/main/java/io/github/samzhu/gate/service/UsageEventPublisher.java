@@ -30,7 +30,7 @@ import io.github.samzhu.gate.model.UsageEventData;
  *   <li>{@code type}: io.github.samzhu.gate.usage.v1</li>
  *   <li>{@code source}: /gate/messages</li>
  *   <li>{@code subject}: JWT sub claim（用戶識別）</li>
- *   <li>{@code id}: 請求 ID（用於追蹤）</li>
+ *   <li>{@code id}: OpenTelemetry Trace ID（用於端到端追蹤）</li>
  * </ul>
  *
  * @see UsageEventData
@@ -57,12 +57,12 @@ public class UsageEventPublisher {
      * 發送用量事件到 Pub/Sub
      *
      * @param eventData 用量事件資料
-     * @param requestId 請求 ID
      * @param subject   用戶識別碼 (JWT sub claim)
      */
-    public void publish(UsageEventData eventData, String requestId, String subject) {
+    public void publish(UsageEventData eventData, String subject) {
         try {
-            String eventId = requestId != null ? requestId : UUID.randomUUID().toString();
+            // 使用 traceId 作為 CloudEvent ID，若無則產生 UUID
+            String eventId = eventData.traceId() != null ? eventData.traceId() : UUID.randomUUID().toString();
 
             CloudEvent cloudEvent = CloudEventBuilder.v1()
                 .withId(eventId)
@@ -83,10 +83,10 @@ public class UsageEventPublisher {
             boolean sent = streamBridge.send(BINDING_NAME, cloudEvent);
 
             if (sent) {
-                log.debug("Usage event published: requestId={}, subject={}, model={}, inputTokens={}, outputTokens={}",
+                log.debug("Usage event published: traceId={}, subject={}, model={}, inputTokens={}, outputTokens={}",
                     eventId, subject, eventData.model(), eventData.inputTokens(), eventData.outputTokens());
             } else {
-                log.warn("Failed to publish usage event: requestId={}", eventId);
+                log.warn("Failed to publish usage event: traceId={}", eventId);
             }
         } catch (Exception e) {
             // Pub/Sub 發送失敗不應影響主要代理功能

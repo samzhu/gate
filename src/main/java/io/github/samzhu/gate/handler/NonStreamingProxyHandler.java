@@ -76,12 +76,11 @@ public class NonStreamingProxyHandler {
      * @param requestBody 請求體
      * @param apiKey      Anthropic API Key
      * @param subject     用戶識別碼
-     * @param requestId   請求 ID
      * @param keyAlias    API Key 別名
      * @return ServerResponse
      */
     public ServerResponse handleNonStreaming(String requestBody, String apiKey, String subject,
-                                              String requestId, String keyAlias) {
+                                              String keyAlias) {
         long startTime = System.currentTimeMillis();
         String status = "success";
         String traceId = getCurrentTraceId();
@@ -105,21 +104,27 @@ public class NonStreamingProxyHandler {
             String responseBody = response.body();
             int statusCode = response.statusCode();
 
+            // 從回應 header 提取 Anthropic request-id
+            String anthropicRequestId = response.headers()
+                .firstValue("request-id")
+                .orElse(null);
+
             if (statusCode != 200) {
-                log.error("Upstream error: status={}, body={}", statusCode, responseBody);
+                log.error("Upstream error: status={}, body={}, anthropicRequestId={}",
+                    statusCode, responseBody, anthropicRequestId);
                 status = "error";
             }
 
             // 解析回應並提取用量資訊
             UsageEventData eventData = parseUsageFromResponse(
-                responseBody, startTime, status, keyAlias, traceId);
+                responseBody, startTime, status, keyAlias, traceId, anthropicRequestId);
 
             // 發送用量事件
-            usageEventPublisher.publish(eventData, requestId, subject);
+            usageEventPublisher.publish(eventData, subject);
 
-            log.debug("Non-streaming completed: subject={}, requestId={}, keyAlias={}, traceId={}, " +
+            log.debug("Non-streaming completed: subject={}, keyAlias={}, traceId={}, anthropicRequestId={}, " +
                 "inputTokens={}, outputTokens={}, latencyMs={}",
-                subject, requestId, keyAlias, traceId,
+                subject, keyAlias, traceId, anthropicRequestId,
                 eventData.inputTokens(), eventData.outputTokens(), eventData.latencyMs());
 
             return ServerResponse.status(HttpStatus.valueOf(statusCode))
@@ -128,17 +133,14 @@ public class NonStreamingProxyHandler {
 
         } catch (IOException e) {
             log.error("IO error during non-streaming request: {}", e.getMessage(), e);
-            status = "error";
-            return buildErrorResponse(e.getMessage(), startTime, keyAlias, traceId, requestId, subject);
+            return buildErrorResponse(e.getMessage(), startTime, keyAlias, traceId, subject);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Non-streaming request interrupted: {}", e.getMessage());
-            status = "error";
-            return buildErrorResponse("Request interrupted", startTime, keyAlias, traceId, requestId, subject);
+            return buildErrorResponse("Request interrupted", startTime, keyAlias, traceId, subject);
         } catch (Exception e) {
             log.error("Unexpected error during non-streaming request: {}", e.getMessage(), e);
-            status = "error";
-            return buildErrorResponse(e.getMessage(), startTime, keyAlias, traceId, requestId, subject);
+            return buildErrorResponse(e.getMessage(), startTime, keyAlias, traceId, subject);
         }
     }
 
@@ -146,13 +148,15 @@ public class NonStreamingProxyHandler {
      * 從回應中解析用量資訊
      */
     private UsageEventData parseUsageFromResponse(String responseBody, long startTime,
-                                                   String status, String keyAlias, String traceId) {
+                                                   String status, String keyAlias, String traceId,
+                                                   String anthropicRequestId) {
         UsageEventData.Builder builder = UsageEventData.builder()
             .latencyMs(System.currentTimeMillis() - startTime)
             .stream(false)
             .status(status)
             .keyAlias(keyAlias)
-            .traceId(traceId);
+            .traceId(traceId)
+            .anthropicRequestId(anthropicRequestId);
 
         try {
             JsonNode root = objectMapper.readTree(responseBody);
@@ -210,7 +214,7 @@ public class NonStreamingProxyHandler {
      */
     private ServerResponse buildErrorResponse(String message, long startTime,
                                                String keyAlias, String traceId,
-                                               String requestId, String subject) {
+                                               String subject) {
         // 發送錯誤用量事件
         UsageEventData eventData = UsageEventData.builder()
             .latencyMs(System.currentTimeMillis() - startTime)
@@ -221,7 +225,7 @@ public class NonStreamingProxyHandler {
             .traceId(traceId)
             .build();
 
-        usageEventPublisher.publish(eventData, requestId, subject);
+        usageEventPublisher.publish(eventData, subject);
 
         String errorBody = String.format(
             "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"%s\"}}",
