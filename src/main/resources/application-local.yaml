@@ -1,0 +1,39 @@
+# =============================================================================
+# LLM Gateway - 本地開發基礎設施
+# =============================================================================
+# Profile: local (預設)
+# 用途: 本地開發環境，使用 RabbitMQ 替代 GCP Pub/Sub
+#
+# 機敏設定:
+#   複製 config/application-secrets.yaml.example → application-secrets.yaml
+# =============================================================================
+
+spring:
+  config:
+    # 載入本地機敏設定 (optional: 檔案不存在也不報錯)
+    import: "optional:file:./config/application-secrets.yaml"
+  cloud:
+    # 停用 GCP 自動配置
+    gcp:
+      core:
+        enabled: false
+      pubsub:
+        enabled: false
+    stream:
+      # 使用 RabbitMQ binder
+      default-binder: rabbit
+      bindings:
+        usageEvent-out-0:
+          binder: rabbit
+  # RabbitMQ 配置 (本地 Docker Compose)
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+  # 停用 GCP 自動配置 (排除自動配置類)
+  autoconfigure:
+    exclude:
+      - com.google.cloud.spring.autoconfigure.core.GcpContextAutoConfiguration
+      - com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration
+      - com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubReactiveAutoConfiguration

@@ -36,3 +36,8 @@ out/
 ### VS Code ###
 .vscode/
 .DS_Store
+
+### Local Secrets ###
+# 本地機敏設定檔 (不提交到版本控制)
+config/application-secrets.yaml
+test/

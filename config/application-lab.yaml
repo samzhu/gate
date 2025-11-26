@@ -1,0 +1,28 @@
+# =============================================================================
+# LAB 環境配置 - 環境行為設定
+# =============================================================================
+# 用途: 實驗/開發環境
+# 啟動: spring.profiles.active=local,lab 或 gcp,lab
+#
+# 注意: 機敏值透過環境變數或 application-secrets.yaml 設定:
+#   - spring.security.oauth2.resourceserver.jwt.jwk-set-uri
+#   - anthropic.api.keys
+# =============================================================================
+
+# 可觀測性 - 全量取樣便於除錯
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,env,configprops
+
+# 日誌 - DEBUG 便於開發
+logging:
+  level:
+    root: INFO
+    io.github.samzhu.gate: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.cloud.gateway: DEBUG

@@ -1,0 +1,24 @@
+# =============================================================================
+# PROD 環境配置 - 環境行為設定
+# =============================================================================
+# 用途: 正式生產環境
+# 啟動: SPRING_PROFILES_ACTIVE=gcp,prod
+#
+# 注意: 機敏值透過環境變數設定 (AUTH_JWKS_URI, ANTHROPIC_API_KEYS, GCP_PROJECT_ID)
+# =============================================================================
+
+# 可觀測性 - 10% 取樣降低成本
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+
+# 日誌 - WARN + JSON 結構化 (便於 Cloud Logging)
+logging:
+  level:
+    root: WARN
+    io.github.samzhu.gate: INFO
+    org.springframework.security: WARN
+    org.springframework.cloud.gateway: WARN
+  pattern:
+    console: '{"timestamp":"%d{yyyy-MM-dd HH:mm:ss.SSS}","level":"%p","logger":"%logger{36}","message":"%m","trace_id":"%X{traceId:-}","span_id":"%X{spanId:-}"}%n'

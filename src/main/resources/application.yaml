@@ -1,8 +1,100 @@
+# =============================================================================
+# LLM Gateway - 基礎共用配置
+# =============================================================================
+# 此檔案包進 Docker Image，包含所有環境共用的配置
+# 環境特定配置透過 config/ 目錄下的 profile 檔案覆蓋
+#
+# 環境變數命名規則:
+#   - 應用程式專屬: 使用 Spring 屬性名稱 (如 spring.profiles.active)
+#   - 業界標準: 保持原樣 (如 OTEL_EXPORTER_OTLP_ENDPOINT)
+# =============================================================================
+
 spring:
   application:
     name: gate
+  profiles:
+    # 預設: local (本地開發)
+    # 部署: spring.profiles.active=gcp,prod
+    active: local
   cloud:
     # 禁用 RefreshScope - Spring Cloud RefreshScope 不支援 AOT/Native Image
     # 參考: https://github.com/spring-cloud/spring-cloud-release/wiki/AOT-transformations-and-native-image-support
     refresh:
       enabled: false
+    gateway:
+      server:
+        webmvc:
+          enabled: true
+    # Spring Cloud Stream 配置
+    # Topic 名稱固定為 llm-gateway-usage
+    stream:
+      bindings:
+        usageEvent-out-0:
+          destination: llm-gateway-usage
+          content-type: application/cloudevents+json
+  # OAuth2 Resource Server 配置 (僅需 JWKS)
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # 本地: application-secrets.yaml 覆蓋
+          # 部署: spring.security.oauth2.resourceserver.jwt.jwk-set-uri 環境變數
+          jwk-set-uri: https://localhost/.well-known/jwks.json
+
+# Anthropic API 配置
+# 部署時透過環境變數覆蓋: anthropic.api.base-url, anthropic.api.keys
+anthropic:
+  api:
+    base-url: https://api.anthropic.com
+    # 多個 API Key (Round Robin 輪換)，逗號分隔
+    keys:
+
+# Resilience4j 配置
+resilience4j:
+  circuitbreaker:
+    instances:
+      anthropic-api:
+        failure-rate-threshold: 50
+        slow-call-rate-threshold: 100
+        slow-call-duration-threshold: 30s
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 10
+        sliding-window-size: 100
+        sliding-window-type: COUNT_BASED
+
+# Actuator 配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  # OpenTelemetry 配置
+  # 取樣率由環境 profile 控制 (lab=1.0, prod=0.1)
+  # 部署時設定業界標準環境變數: OTEL_EXPORTER_OTLP_ENDPOINT
+  # Spring Boot 會自動讀取 OTel 標準環境變數
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+    metrics:
+      export:
+        url: http://localhost:4318/v1/metrics
+
+# 日誌配置 (預設開發模式，生產環境由 profile 覆蓋)
+logging:
+  level:
+    root: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{traceId:-},%X{spanId:-}] %-5level %logger{36} - %msg%n"

@@ -1,8 +1,8 @@
 # LLM Gateway: 產品需求文件
 
 ## 文件資訊
-- **版本**: 1.2.0
-- **最後更新**: 2025-11-25
+- **版本**: 1.6.0
+- **最後更新**: 2025-11-26
 - **專案**: llm-gateway
 - **技術堆疊**: Spring Boot 4.0.0, Spring Cloud Gateway Server Web MVC, Spring Cloud GCP Pub/Sub, Java 25, GraalVM Native
 - **目標平台**: 企業級 LLM API 閘道服務
@@ -197,12 +197,12 @@ Claude Code CLI 透過環境變數配置使用自訂 API 端點：
 #### 4.1.2 OAuth2 認證
 **目的**: 驗證客戶端的存取權限
 
-**認證伺服器**: 自建 OAuth2 認證伺服器，提供 JWKS 端點
+**認證伺服器**: 自建 OAuth2 認證伺服器，僅需提供 JWKS 端點
 
 **流程**:
 1. 客戶端在 `Authorization` Header 中提供 Bearer Token
 2. Gateway 透過 JWKS 端點取得公鑰，驗證 JWT 簽章
-3. 驗證 Token 的有效性（簽章、過期時間、audience）
+3. 驗證 Token 的有效性（簽章、過期時間）
 4. 從 Token 的 `sub` claim 提取用戶識別資訊
 5. 將 `sub` 用於用量事件記錄
 
@@ -213,9 +213,11 @@ Claude Code CLI 透過環境變數配置使用自訂 API 端點：
 |-------|------|
 | `sub` | 用戶唯一識別碼，用於用量追蹤 |
 | `exp` | Token 過期時間 |
-| `aud` | 目標 audience（需包含 `llm-gateway`）|
 
-> **注意**: Token 刷新由 Gate-CLI 負責，Gateway 只負責驗證。
+> **注意**:
+> - Token 刷新由 Gate-CLI 負責，Gateway 只負責驗證
+> - Gateway 只需驗證簽章和過期時間，不驗證 `iss` 和 `aud` claims
+> - 認證伺服器只需實作 JWKS 端點，不需要完整的 OIDC Discovery
 
 #### 4.1.3 API Key 輪換
 **目的**: 支援多組 Anthropic API Key，分散 API 配額壓力並提供容錯能力
@@ -462,9 +464,16 @@ llm-gateway/
 │   └── util/
 │       ├── SseParser.java                   # SSE 事件解析
 │       └── TokenExtractor.java              # Token 資訊提取
-├── src/main/resources/
-│   ├── application.yml                       # 主配置
-│   └── application-prod.yml                  # 生產環境配置
+├── src/main/resources/                       # 打包進 Docker Image
+│   ├── application.yaml                      # 基礎共用配置
+│   ├── application-local.yaml                # 基礎設施: 本地 (RabbitMQ)
+│   └── application-gcp.yaml                  # 基礎設施: GCP (Pub/Sub)
+├── config/                                   # 外部配置 (K8s ConfigMap 掛載)
+│   ├── application-lab.yaml                  # 環境變數: LAB
+│   ├── application-sit.yaml                  # 環境變數: SIT
+│   ├── application-uat.yaml                  # 環境變數: UAT
+│   ├── application-prod.yaml                 # 環境變數: PROD
+│   └── application-secrets.yaml.example      # 機敏設定範本
 └── src/test/java/                            # 測試
 ```
 
@@ -755,47 +764,164 @@ dependencyManagement {
 }
 ```
 
-### 6.4 配置
+### 6.4 配置架構
 
-**application.yml**:
+#### 6.4.1 多維度 Profile 設計
+
+採用**基礎設施 + 環境**雙維度 Profile 設計：
+
+```
+gate/
+├── src/main/resources/               # 打包進 Docker Image
+│   ├── application.yaml              # 基礎共用配置
+│   ├── application-local.yaml        # 基礎設施: 本地 (RabbitMQ)
+│   └── application-gcp.yaml          # 基礎設施: GCP (Pub/Sub)
+│
+└── config/                           # 外部配置 (K8s ConfigMap 掛載)
+    ├── application-lab.yaml          # 環境變數: LAB
+    ├── application-sit.yaml          # 環境變數: SIT
+    ├── application-uat.yaml          # 環境變數: UAT
+    ├── application-prod.yaml         # 環境變數: PROD
+    ├── application-secrets.yaml      # 本地機敏設定 (gitignore)
+    └── application-secrets.yaml.example  # 機敏設定範本
+```
+
+**維度說明**:
+
+| 維度 | Profile | 位置 | 負責內容 |
+|------|---------|------|----------|
+| **基礎設施** | `local`, `gcp` | Docker Image 內 | Message Binder, Cloud 服務配置 |
+| **環境** | `lab`, `sit`, `uat`, `prod` | 外部掛載 | 環境專屬值 (endpoints, log level, 取樣率) |
+
+**啟動範例**:
+```bash
+# 本地開發 (預設)
+SPRING_PROFILES_ACTIVE=local
+
+# 本地開發 + LAB 環境值
+SPRING_PROFILES_ACTIVE=local,lab
+
+# GCP + PROD 環境值
+SPRING_PROFILES_ACTIVE=gcp,prod
+```
+
+**Profile 載入順序** (後面覆蓋前面):
+1. `application.yaml` (base)
+2. `application-local.yaml` 或 `application-gcp.yaml` (infrastructure)
+3. `application-{env}.yaml` (environment behavior)
+4. `application-secrets.yaml` (local secrets, optional)
+
+#### 6.4.2 配置分類原則
+
+遵循 [12-Factor App](https://12factor.net/config) 配置原則：
+
+| 配置類型 | 設定位置 | 範例 |
+|----------|----------|------|
+| **應用程式預設值** | `application.yaml` | 直接值 |
+| **基礎設施行為** | `application-{infra}.yaml` | Binder 類型、Cloud 服務 |
+| **環境行為設定** | `application-{env}.yaml` | Log level、取樣率 |
+| **機敏值 (本地)** | `application-secrets.yaml` | 直接值，覆蓋預設 |
+| **機敏值 (部署)** | 環境變數 / K8s Secrets | 見下方命名規則 |
+
+**環境變數命名規則**:
+
+| 類型 | 命名風格 | 範例 | 理由 |
+|------|----------|------|------|
+| **應用程式專屬** | Spring 屬性名稱 | `spring.security.oauth2.resourceserver.jwt.jwk-set-uri` | Spring Boot Relaxed Binding |
+| **業界標準** | 保持原樣 (大寫) | `OTEL_EXPORTER_OTLP_ENDPOINT` | 遵循 [OTel 官方規範](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/) |
+
+**重要原則**:
+- 環境 Profile (`lab/sit/uat/prod`) **不應定義機敏值**，機敏值由環境變數控制
+- 基礎配置直接設定預設值（如 `https://localhost/.well-known/jwks.json`）
+- 本地需覆蓋預設值時，使用 `application-secrets.yaml` (gitignore)
+- 部署時：應用程式專屬用 Spring 屬性名稱，業界標準保持原樣
+
+#### 6.4.3 機敏設定管理
+
+本地開發的機敏設定透過獨立檔案管理：
+
+```bash
+# 1. 複製範本
+cp config/application-secrets.yaml.example config/application-secrets.yaml
+
+# 2. 編輯填入實際值
+vim config/application-secrets.yaml
+
+# 3. 啟動 (secrets 自動載入)
+./gradlew bootRun
+```
+
+**application-secrets.yaml** (gitignore，不提交):
 ```yaml
+# 直接設定值，覆蓋 application.yaml 的預設值
 spring:
-  application:
-    name: llm-gateway
-  cloud:
-    gateway:
-      server:
-        webmvc:
-          enabled: true
-    # GCP Pub/Sub Stream Binder 配置
-    stream:
-      bindings:
-        usageEvent-out-0:
-          destination: llm-gateway-usage
-      gcp:
-        pubsub:
-          project-id: ${GCP_PROJECT_ID}
-  # OAuth2 Resource Server 配置 (JWKS)
   security:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://auth.company.com
-          jwk-set-uri: https://auth.company.com/.well-known/jwks.json
-          audiences:
-            - llm-gateway
+          jwk-set-uri: https://your-auth-server.com/oauth2/jwks
 
-# Anthropic API 配置
+anthropic:
+  api:
+    keys: sk-ant-api-key-1,sk-ant-api-key-2
+```
+
+**部署環境** (Cloud Run / K8s):
+```yaml
+# 使用 Spring 屬性名稱作為環境變數 (Relaxed Binding)
+# 注意: GCP project-id 自動取得，無需設定
+env:
+  - name: spring.profiles.active
+    value: gcp,prod
+  - name: spring.security.oauth2.resourceserver.jwt.jwk-set-uri
+    value: https://prod-auth.example.com/oauth2/jwks
+  - name: anthropic.api.keys
+    valueFrom:
+      secretKeyRef:
+        name: anthropic-secrets
+        key: api-keys
+```
+
+#### 6.4.4 基礎共用配置
+
+**src/main/resources/application.yaml** (打包進 Docker):
+```yaml
+spring:
+  application:
+    name: gate
+  profiles:
+    # 預設: local (本地開發)
+    # 部署: spring.profiles.active=gcp,prod
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  cloud:
+    refresh:
+      enabled: false  # AOT/Native Image 不支援 RefreshScope
+    gateway:
+      server:
+        webmvc:
+          enabled: true
+    # Spring Cloud Stream 配置
+    # Topic 名稱固定為 llm-gateway-usage
+    stream:
+      bindings:
+        usageEvent-out-0:
+          destination: llm-gateway-usage
+          content-type: application/cloudevents+json
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # 本地: application-secrets.yaml 覆蓋
+          # 部署: spring.security.oauth2.resourceserver.jwt.jwk-set-uri 環境變數
+          jwk-set-uri: https://localhost/.well-known/jwks.json
+
 anthropic:
   api:
     base-url: https://api.anthropic.com
-    # 多個 API Key (Round Robin 輪換)
+    # 多個 API Key (Round Robin 輪換)，逗號分隔
+    # 部署: anthropic.api.keys 環境變數
     keys:
-      - ${ANTHROPIC_API_KEY_1}
-      - ${ANTHROPIC_API_KEY_2}
-      - ${ANTHROPIC_API_KEY_3}
 
-# Resilience4j 配置
 resilience4j:
   circuitbreaker:
     instances:
@@ -806,29 +932,42 @@ resilience4j:
         wait-duration-in-open-state: 60s
         permitted-number-of-calls-in-half-open-state: 10
         sliding-window-size: 100
+        sliding-window-type: COUNT_BASED
 
-# 可觀測性配置
 management:
   endpoints:
     web:
       exposure:
-        include: health,metrics,prometheus
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  # OpenTelemetry 配置
+  # 部署時設定業界標準環境變數: OTEL_EXPORTER_OTLP_ENDPOINT
+  # Spring Boot 會自動讀取 OTel 標準環境變數
   tracing:
     sampling:
       probability: 1.0
   otlp:
     tracing:
-      endpoint: http://otel-collector:4318/v1/traces
+      endpoint: http://localhost:4318/v1/traces
     metrics:
-      endpoint: http://otel-collector:4318/v1/metrics
+      export:
+        url: http://localhost:4318/v1/metrics
 
-# 日誌配置
 logging:
+  level:
+    root: INFO
   pattern:
-    console: '{"timestamp":"%d","level":"%p","logger":"%logger","message":"%m","trace_id":"%X{traceId}","span_id":"%X{spanId}"}%n'
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{traceId:-},%X{spanId:-}] %-5level %logger{36} - %msg%n"
 ```
 
-> **參考文件**: [Spring Cloud GCP Pub/Sub Stream Binder](https://googlecloudplatform.github.io/spring-cloud-gcp/7.4.1/reference/html/index.html#spring-cloud-stream)
+> **參考文件**:
+> - [Spring Boot Profiles](https://docs.spring.io/spring-boot/reference/features/profiles.html)
+> - [Spring Boot External Config](https://docs.spring.io/spring-boot/reference/features/external-config.html)
+> - [Spring Cloud GCP Pub/Sub Stream Binder](https://googlecloudplatform.github.io/spring-cloud-gcp/7.4.1/reference/html/index.html#spring-cloud-stream)
 
 ---
 
@@ -908,7 +1047,7 @@ Client                     LLM Gateway                    Anthropic API      Pub
 |--------------|-------------|------------|------|
 | Token 無效 | 401 | authentication_error | JWT Token 驗證失敗（簽章或格式錯誤）|
 | Token 過期 | 401 | authentication_error | Token 已過期 |
-| 權限不足 | 403 | permission_error | 無權存取此資源（audience 不符）|
+| Token 缺失 | 401 | authentication_error | 未提供 Authorization Header |
 | Circuit Open | 503 | overloaded_error | 服務暫時不可用 |
 | 上游錯誤 | 502 | api_error | Anthropic API 回應錯誤 |
 
@@ -1018,23 +1157,17 @@ spec:
             path: /actuator/health/readiness
             port: 8080
         env:
-        - name: GCP_PROJECT_ID
-          value: "your-gcp-project"
-        - name: ANTHROPIC_API_KEY_1
+        # 使用 Spring 屬性名稱 (Relaxed Binding)
+        # 注意: GCP project-id 自動取得，無需設定
+        - name: spring.profiles.active
+          value: "gcp,prod"
+        - name: spring.security.oauth2.resourceserver.jwt.jwk-set-uri
+          value: "https://your-auth-server.com/oauth2/jwks"
+        - name: anthropic.api.keys
           valueFrom:
             secretKeyRef:
               name: anthropic-secrets
-              key: api-key-1
-        - name: ANTHROPIC_API_KEY_2
-          valueFrom:
-            secretKeyRef:
-              name: anthropic-secrets
-              key: api-key-2
-        - name: ANTHROPIC_API_KEY_3
-          valueFrom:
-            secretKeyRef:
-              name: anthropic-secrets
-              key: api-key-3
+              key: api-keys  # 逗號分隔的多組 API Key
 ```
 
 ---
@@ -1169,3 +1302,7 @@ spec:
 | 1.0 | 2025-11-25 | AI 助理 | 初始 PRD 建立 |
 | 1.1 | 2025-11-25 | AI 助理 | 需求釐清後更新：OAuth2 使用自建伺服器 + JWKS、JWT sub claim 作為識別、多 API Key Round Robin 輪換、GCP Pub/Sub 發送用量事件、Web MVC SSE 處理、移除用量查詢 API/IP 白名單/速率限制/動態配置更新 |
 | 1.2 | 2025-11-25 | AI 助理 | 新增 CloudEvents 事件格式：用量事件採用 CloudEvents v1.0 規範、新增 cloudevents-spring 和 cloudevents-json-jackson 依賴 |
+| 1.3 | 2025-11-25 | AI 助理 | 簡化 OAuth2 配置：移除 issuer-uri 和 audiences 驗證，僅使用 jwk-set-uri 驗證 JWT 簽章；認證伺服器只需提供 JWKS 端點，不需要完整 OIDC Discovery |
+| 1.4 | 2025-11-26 | AI 助理 | 重構配置架構：採用多維度 Profile 設計、基礎設施 (local/gcp) 打包進 Image、環境行為 (lab/sit/uat/prod) 外部掛載、遵循 12-Factor App 配置原則、機敏值透過環境變數控制 |
+| 1.5 | 2025-11-26 | AI 助理 | 統一環境變數命名：移除自訂大寫環境變數 (AUTH_JWKS_URI)，改用 Spring 屬性名稱作為環境變數 (spring.security.oauth2.resourceserver.jwt.jwk-set-uri)，利用 Spring Boot Relaxed Binding 特性 |
+| 1.6 | 2025-11-26 | AI 助理 | 環境變數命名規則：區分「應用程式專屬」(Spring 屬性名稱) 與「業界標準」(如 OTEL_EXPORTER_OTLP_ENDPOINT 遵循 OTel 官方規範)；移除 application.yaml 中的 ${...} placeholder，改用直接預設值 |
