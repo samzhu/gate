@@ -3,7 +3,46 @@ package io.github.samzhu.gate.model;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * 用量事件資料 (CloudEvents data payload)
+ * 用量事件資料（CloudEvents data payload）
+ *
+ * <p>記錄每次 Claude API 呼叫的 Token 用量和請求資訊，作為 CloudEvents 的 data 欄位發送到 Pub/Sub。
+ *
+ * <p>欄位說明：
+ * <ul>
+ *   <li><b>核心用量</b>
+ *       <ul>
+ *         <li>{@code model} - 使用的模型名稱（如 claude-sonnet-4-5-20250929）</li>
+ *         <li>{@code inputTokens} - 輸入 Token 數量</li>
+ *         <li>{@code outputTokens} - 輸出 Token 數量</li>
+ *         <li>{@code cacheCreationTokens} - 快取建立消耗的 Token</li>
+ *         <li>{@code cacheReadTokens} - 從快取讀取的 Token</li>
+ *         <li>{@code totalTokens} - 總 Token 數（input + output）</li>
+ *       </ul>
+ *   </li>
+ *   <li><b>請求資訊</b>
+ *       <ul>
+ *         <li>{@code messageId} - Anthropic 回應的 message ID（msg_xxx）</li>
+ *         <li>{@code latencyMs} - 請求延遲（毫秒）</li>
+ *         <li>{@code stream} - 是否為串流請求</li>
+ *         <li>{@code stopReason} - 結束原因（end_turn、max_tokens 等）</li>
+ *       </ul>
+ *   </li>
+ *   <li><b>狀態追蹤</b>
+ *       <ul>
+ *         <li>{@code status} - 請求狀態（success/error）</li>
+ *         <li>{@code errorType} - 錯誤類型（若發生錯誤）</li>
+ *       </ul>
+ *   </li>
+ *   <li><b>運維資訊</b>
+ *       <ul>
+ *         <li>{@code keyAlias} - 使用的 API Key 別名</li>
+ *         <li>{@code traceId} - OpenTelemetry Trace ID</li>
+ *       </ul>
+ *   </li>
+ * </ul>
+ *
+ * @see io.github.samzhu.gate.service.UsageEventPublisher
+ * @see <a href="https://platform.claude.com/docs/en/api/messages/create">Claude Messages API</a>
  */
 public record UsageEventData(
     // === 核心用量 ===

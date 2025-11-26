@@ -14,7 +14,25 @@ import io.github.samzhu.gate.service.ApiKeySelection;
 
 /**
  * API Key 注入過濾器
- * 移除原始 Authorization Header，注入 Anthropic API Key
+ *
+ * <p>實作 Spring Cloud Gateway Server MVC 的請求過濾，執行：
+ * <ul>
+ *   <li>移除原始 {@code Authorization} Header（JWT Token）</li>
+ *   <li>透過 Round Robin 取得 Anthropic API Key 並注入 {@code x-api-key} Header</li>
+ *   <li>設定 {@code anthropic-version} Header</li>
+ *   <li>從 JWT 提取 subject 並存入請求屬性供用量追蹤使用</li>
+ *   <li>產生 requestId 供日誌追蹤</li>
+ * </ul>
+ *
+ * <p>請求屬性：
+ * <ul>
+ *   <li>{@code gateway.subject} - 用戶識別碼（JWT sub claim）</li>
+ *   <li>{@code gateway.requestId} - 請求唯一識別碼（UUID）</li>
+ *   <li>{@code gateway.keyAlias} - 使用的 API Key 別名</li>
+ * </ul>
+ *
+ * @see ApiKeyRotationService
+ * @see io.github.samzhu.gate.config.GatewayConfig
  */
 @Component
 public class ApiKeyInjectionFilter implements Function<ServerRequest, ServerRequest> {

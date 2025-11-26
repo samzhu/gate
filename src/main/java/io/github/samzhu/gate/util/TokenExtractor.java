@@ -7,8 +7,32 @@ import io.github.samzhu.gate.model.StreamEvent;
 import io.github.samzhu.gate.model.UsageEventData;
 
 /**
- * Token 用量提取工具
- * 用於從串流事件中累計提取 Token 用量
+ * SSE 串流 Token 用量提取工具
+ *
+ * <p>從 Claude API 串流事件中累計提取 Token 用量資訊，用於建立用量事件。
+ *
+ * <p>提取邏輯：
+ * <ul>
+ *   <li>{@code message_start} 事件 - 提取 input_tokens、cache tokens、model、message_id</li>
+ *   <li>{@code message_delta} 事件 - 提取最終 output_tokens、stop_reason</li>
+ * </ul>
+ *
+ * <p>執行緒安全：使用 {@link java.util.concurrent.atomic.AtomicInteger} 和
+ * {@link java.util.concurrent.atomic.AtomicReference} 確保並發存取安全，
+ * 但通常每個串流請求會獨立使用一個實例。
+ *
+ * <p>使用方式：
+ * <pre>{@code
+ * TokenExtractor extractor = new TokenExtractor();
+ * // 處理每個 SSE 事件
+ * streamEvents.forEach(extractor::processEvent);
+ * // 串流結束後建立用量資料
+ * UsageEventData data = extractor.buildUsageEventData("success", keyAlias, traceId);
+ * }</pre>
+ *
+ * @see io.github.samzhu.gate.model.StreamEvent
+ * @see io.github.samzhu.gate.model.UsageEventData
+ * @see io.github.samzhu.gate.handler.StreamingProxyHandler
  */
 public class TokenExtractor {
 

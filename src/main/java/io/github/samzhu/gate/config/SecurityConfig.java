@@ -1,5 +1,7 @@
 package io.github.samzhu.gate.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -8,15 +10,37 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * Spring Security 配置
- * 配置 OAuth2 Resource Server 使用 JWT 驗證 (僅 JWKS)
+ * Spring Security 安全配置
+ *
+ * <p>配置 OAuth2 Resource Server 使用 JWT 驗證，實現 API 閘道的認證機制：
+ * <ul>
+ *   <li>JWT 驗證透過 JWKS（JSON Web Key Set）端點取得公鑰</li>
+ *   <li>無狀態 Session（適合 API Gateway）</li>
+ *   <li>停用 CSRF（RESTful API 不需要）</li>
+ * </ul>
+ *
+ * <p>端點權限：
+ * <ul>
+ *   <li>{@code /actuator/**} - 公開存取（健康檢查、指標）</li>
+ *   <li>其他端點 - 需要有效 JWT Token</li>
+ * </ul>
+ *
+ * <p>JWKS 配置位於 {@code application.yaml}：
+ * <pre>{@code
+ * spring.security.oauth2.resourceserver.jwt.jwk-set-uri=https://your-auth-server/.well-known/jwks.json
+ * }</pre>
+ *
+ * @see io.github.samzhu.gate.exception.GlobalExceptionHandler
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        log.info("Configuring OAuth2 Resource Server with JWT authentication");
         http
             // 停用 CSRF (API Gateway 不需要)
             .csrf(csrf -> csrf.disable())

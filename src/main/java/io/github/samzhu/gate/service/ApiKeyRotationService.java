@@ -12,7 +12,18 @@ import io.github.samzhu.gate.config.ApiKeyConfig;
 
 /**
  * API Key 輪換服務
- * 使用 Round Robin 策略分配 Anthropic API Key
+ *
+ * <p>使用 Round Robin（循環輪換）策略分配 Anthropic API Key，實現：
+ * <ul>
+ *   <li>負載分散：將請求平均分配到多組 API Key</li>
+ *   <li>配額管理：避免單一 Key 過快達到 Rate Limit</li>
+ *   <li>容錯能力：支援多組 Key 備援</li>
+ * </ul>
+ *
+ * <p>執行緒安全：使用 {@link AtomicInteger} 確保並發存取時的正確性。
+ *
+ * @see ApiKeyConfig
+ * @see ApiKeySelection
  */
 @Service
 public class ApiKeyRotationService {

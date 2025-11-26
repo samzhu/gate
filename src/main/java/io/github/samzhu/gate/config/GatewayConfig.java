@@ -22,8 +22,24 @@ import io.github.samzhu.gate.service.ApiKeyRotationService;
 import io.github.samzhu.gate.service.ApiKeySelection;
 
 /**
- * Spring Cloud Gateway Server MVC 配置
- * 使用 RouterFunction 定義 /v1/messages 路由
+ * Spring Cloud Gateway Server MVC 路由配置
+ *
+ * <p>定義 Claude API 代理路由 {@code POST /v1/messages}，處理流程：
+ * <ol>
+ *   <li>從 JWT 取得用戶識別（subject）</li>
+ *   <li>透過 Round Robin 策略選擇 API Key</li>
+ *   <li>根據請求中的 {@code stream} 參數分流：
+ *       <ul>
+ *         <li>{@code stream: true} → 串流處理（SSE）</li>
+ *         <li>{@code stream: false} → 非串流處理（JSON）</li>
+ *       </ul>
+ *   </li>
+ *   <li>代理請求到 Anthropic API 並追蹤 Token 用量</li>
+ * </ol>
+ *
+ * @see StreamingProxyHandler
+ * @see NonStreamingProxyHandler
+ * @see <a href="https://platform.claude.com/docs/en/api/messages/create">Claude Messages API</a>
  */
 @Configuration
 public class GatewayConfig {

@@ -26,7 +26,25 @@ import io.github.samzhu.gate.util.TokenExtractor;
 
 /**
  * 串流代理處理器
- * 使用 Spring Web MVC ServerResponse.sse() 處理 Claude API 串流回應
+ *
+ * <p>處理 Claude API 的 SSE（Server-Sent Events）串流回應，執行以下功能：
+ * <ul>
+ *   <li>代理請求到 Anthropic API（{@code stream: true}）</li>
+ *   <li>透傳 SSE 事件給客戶端（即時回應）</li>
+ *   <li>解析 SSE 事件提取 Token 用量：
+ *       <ul>
+ *         <li>{@code message_start} - 提取 input_tokens、model、message_id</li>
+ *         <li>{@code message_delta} - 提取 output_tokens、stop_reason</li>
+ *       </ul>
+ *   </li>
+ *   <li>串流結束後發送 CloudEvents 格式的用量事件</li>
+ * </ul>
+ *
+ * <p>使用 {@link ServerResponse#sse} 建立 SSE 回應，支援長達 10 分鐘的串流。
+ *
+ * @see NonStreamingProxyHandler
+ * @see TokenExtractor
+ * @see <a href="https://platform.claude.com/docs/en/build-with-claude/streaming">Claude Streaming</a>
  */
 @Component
 public class StreamingProxyHandler {

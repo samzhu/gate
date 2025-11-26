@@ -25,7 +25,25 @@ import io.github.samzhu.gate.service.UsageEventPublisher;
 
 /**
  * 非串流代理處理器
- * 處理 stream: false 的 Claude API 請求
+ *
+ * <p>處理 Claude API 的非串流 JSON 回應（{@code stream: false}），執行以下功能：
+ * <ul>
+ *   <li>代理請求到 Anthropic API</li>
+ *   <li>解析完整 JSON 回應提取 Token 用量：
+ *       <ul>
+ *         <li>{@code usage.input_tokens} - 輸入 Token 數</li>
+ *         <li>{@code usage.output_tokens} - 輸出 Token 數</li>
+ *         <li>{@code usage.cache_creation_input_tokens} - 快取建立 Token</li>
+ *         <li>{@code usage.cache_read_input_tokens} - 快取讀取 Token</li>
+ *       </ul>
+ *   </li>
+ *   <li>發送 CloudEvents 格式的用量事件到 Pub/Sub</li>
+ * </ul>
+ *
+ * <p>注意：Claude Code CLI 主要使用串流模式，非串流模式較少使用。
+ *
+ * @see StreamingProxyHandler
+ * @see <a href="https://platform.claude.com/docs/en/api/messages/create">Claude Messages API</a>
  */
 @Component
 public class NonStreamingProxyHandler {

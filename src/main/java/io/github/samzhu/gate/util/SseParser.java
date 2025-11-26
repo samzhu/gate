@@ -8,7 +8,27 @@ import tools.jackson.databind.ObjectMapper;
 import io.github.samzhu.gate.model.StreamEvent;
 
 /**
- * SSE 事件解析工具
+ * SSE（Server-Sent Events）事件解析工具
+ *
+ * <p>解析 Claude API 串流回應中的 SSE 格式資料，支援：
+ * <ul>
+ *   <li>提取 {@code data:} 行內容</li>
+ *   <li>提取 {@code event:} 行類型</li>
+ *   <li>將 JSON data 解析為 {@link StreamEvent} 物件</li>
+ * </ul>
+ *
+ * <p>SSE 格式範例：
+ * <pre>{@code
+ * event: message_start
+ * data: {"type":"message_start","message":{"id":"msg_xxx",...}}
+ *
+ * event: content_block_delta
+ * data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}
+ * }</pre>
+ *
+ * @see StreamEvent
+ * @see io.github.samzhu.gate.handler.StreamingProxyHandler
+ * @see <a href="https://html.spec.whatwg.org/multipage/server-sent-events.html">SSE Specification</a>
  */
 public class SseParser {
 

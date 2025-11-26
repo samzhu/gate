@@ -14,7 +14,20 @@ import io.github.samzhu.gate.model.GatewayError;
 
 /**
  * 全域異常處理器
- * 返回 Anthropic API 相容的錯誤格式
+ *
+ * <p>統一處理閘道異常並返回 Anthropic API 相容的錯誤格式，
+ * 確保 Claude Code CLI 和其他客戶端能正確解析錯誤。
+ *
+ * <p>處理的異常類型：
+ * <ul>
+ *   <li>{@code AuthenticationException} - 401 Unauthorized（JWT 驗證失敗）</li>
+ *   <li>{@code AccessDeniedException} - 403 Forbidden（權限不足）</li>
+ *   <li>{@code CallNotPermittedException} - 503 Service Unavailable（熔斷器開路）</li>
+ *   <li>{@code IllegalStateException} - 503/500（配置錯誤）</li>
+ *   <li>{@code Exception} - 500 Internal Server Error（未預期錯誤）</li>
+ * </ul>
+ *
+ * @see GatewayError
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {

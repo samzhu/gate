@@ -18,7 +18,23 @@ import io.github.samzhu.gate.model.UsageEventData;
 
 /**
  * 用量事件發送服務
- * 使用 CloudEvents 格式發送到 GCP Pub/Sub
+ *
+ * <p>使用 CloudEvents v1.0 規範格式，透過 Spring Cloud Stream 發送用量事件到訊息佇列：
+ * <ul>
+ *   <li>本地開發：RabbitMQ</li>
+ *   <li>生產環境：GCP Pub/Sub</li>
+ * </ul>
+ *
+ * <p>CloudEvents 屬性：
+ * <ul>
+ *   <li>{@code type}: io.github.samzhu.gate.usage.v1</li>
+ *   <li>{@code source}: /gate/messages</li>
+ *   <li>{@code subject}: JWT sub claim（用戶識別）</li>
+ *   <li>{@code id}: 請求 ID（用於追蹤）</li>
+ * </ul>
+ *
+ * @see UsageEventData
+ * @see <a href="https://cloudevents.io/">CloudEvents Specification</a>
  */
 @Service
 public class UsageEventPublisher {
