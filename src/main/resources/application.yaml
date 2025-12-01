@@ -5,7 +5,7 @@
 # 環境特定配置透過 config/ 目錄下的 profile 檔案覆蓋
 #
 # 環境變數命名規則:
-#   - 應用程式專屬: 使用 Spring 屬性名稱 (如 spring.profiles.active)
+#   - 應用程式專屬: 使用 Spring 屬性名稱 (如 spring.profiles.default)
 #   - 業界標準: 保持原樣 (如 OTEL_EXPORTER_OTLP_ENDPOINT)
 # =============================================================================
 
@@ -13,9 +13,9 @@ spring:
   application:
     name: gate
   profiles:
-    # 預設: local (本地開發)
-    # 部署: spring.profiles.active=gcp,prod
-    active: local
+    # 預設 profiles（可被 spring.profiles.active 覆蓋）
+    # 本地開發: 自動使用 local,dev
+    default: local,dev
   cloud:
     # 禁用 RefreshScope - Spring Cloud RefreshScope 不支援 AOT/Native Image
     # 參考: https://github.com/spring-cloud/spring-cloud-release/wiki/AOT-transformations-and-native-image-support

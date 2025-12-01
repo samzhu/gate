@@ -1,14 +1,18 @@
 # =============================================================================
-# LAB 環境配置 - 環境行為設定
+# DEV 環境配置 - 本地開發環境行為設定
 # =============================================================================
-# 用途: 實驗/開發環境
-# 啟動: spring.profiles.active=local,lab 或 gcp,lab
-#       (覆蓋 spring.profiles.default)
+# 用途: 本地開發環境
+# 預設: spring.profiles.default=local,dev (自動啟用)
 #
-# 注意: 機敏值透過環境變數或 application-secrets.yaml 設定:
+# 注意: 機敏值透過 application-secrets.yaml 設定:
 #   - spring.security.oauth2.resourceserver.jwt.jwk-set-uri
 #   - anthropic.api.keys
 # =============================================================================
+
+spring:
+  config:
+    # 載入本地機敏設定 (optional: 檔案不存在也不報錯)
+    import: "optional:file:./config/application-secrets.yaml"
 
 # 可觀測性 - 全量取樣便於除錯
 management:

@@ -2,7 +2,7 @@
 # SIT 環境配置 - 環境行為設定
 # =============================================================================
 # 用途: 系統整合測試環境
-# 啟動: SPRING_PROFILES_ACTIVE=gcp,sit
+# 啟動: spring.profiles.active=gcp,sit (覆蓋 spring.profiles.default)
 #
 # 注意: 機敏值透過環境變數設定 (AUTH_JWKS_URI, ANTHROPIC_API_KEYS, GCP_PROJECT_ID)
 # =============================================================================

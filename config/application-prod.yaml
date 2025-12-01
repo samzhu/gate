@@ -2,7 +2,7 @@
 # PROD 環境配置 - 環境行為設定
 # =============================================================================
 # 用途: 正式生產環境
-# 啟動: SPRING_PROFILES_ACTIVE=gcp,prod
+# 啟動: spring.profiles.active=gcp,prod (覆蓋 spring.profiles.default)
 #
 # 注意: 機敏值透過環境變數設定 (AUTH_JWKS_URI, ANTHROPIC_API_KEYS, GCP_PROJECT_ID)
 # =============================================================================

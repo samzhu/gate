@@ -1,17 +1,14 @@
 # =============================================================================
 # LLM Gateway - 本地開發基礎設施
 # =============================================================================
-# Profile: local (預設)
-# 用途: 本地開發環境，使用 RabbitMQ 替代 GCP Pub/Sub
+# Profile: local
+# 用途: 本地開發環境基礎設施，使用 RabbitMQ 替代 GCP Pub/Sub
 #
-# 機敏設定:
-#   複製 config/application-secrets.yaml.example → application-secrets.yaml
+# 此 profile 只負責基礎設施配置 (MQ binder)
+# 機敏設定由 dev profile 的 spring.config.import 載入
 # =============================================================================
 
 spring:
-  config:
-    # 載入本地機敏設定 (optional: 檔案不存在也不報錯)
-    import: "optional:file:./config/application-secrets.yaml"
   cloud:
     # 停用 GCP 自動配置
     gcp:
