@@ -28,6 +28,10 @@ spring:
 # GCP 環境 OTLP 配置
 # 發送到 Sidecar Collector (localhost)，由 Collector 導出到 GCP 服務
 management:
+  health:
+    # 停用 RabbitMQ 健康檢查 (GCP 使用 Pub/Sub，不需要 RabbitMQ)
+    rabbit:
+      enabled: false
   opentelemetry:
     tracing:
       export:
