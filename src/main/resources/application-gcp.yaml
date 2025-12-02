@@ -8,6 +8,11 @@
 #   - project-id: 自動從 GCP 環境取得，無需手動設定
 #   - Topic 名稱: 程式固定使用 llm-gateway-usage
 #
+# Secret Manager 整合:
+#   - 使用 sm@ 語法從 GCP Secret Manager 讀取機敏值
+#   - 語法: ${sm@secret-name} 或 ${sm@project-id/secret-name/version}
+#   - 參考: https://googlecloudplatform.github.io/spring-cloud-gcp/7.4.1/reference/html/index.html#secret-manager
+#
 # 可觀測性說明 (OpenTelemetry Collector Sidecar):
 #   - Cloud Run 部署 OTel Collector 作為 Sidecar 容器
 #   - 應用程式發送 OTLP 到 localhost:4317 (gRPC) 或 localhost:4318 (HTTP)
@@ -16,6 +21,9 @@
 # =============================================================================
 
 spring:
+  # 啟用 Secret Manager Config Data API (所有 GCP 環境共用)
+  config:
+    import: sm@
   cloud:
     stream:
       bindings:

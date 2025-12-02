@@ -320,12 +320,12 @@ EOF
 | Annotation | 說明 |
 |------------|------|
 | `run.googleapis.com/launch-stage: BETA` | 啟用多容器 sidecar 功能 |
-| `run.googleapis.com/cpu-throttling: 'false'` | CPU 持續分配，確保 OTel Collector 背景運行 ([官方建議](https://cloud.google.com/run/docs/configuring/cpu-allocation)) |
 
 **Template 層級** (`spec.template.metadata.annotations`):
 
 | Annotation | 說明 |
 |------------|------|
+| `run.googleapis.com/cpu-throttling: 'false'` | CPU 持續分配，確保 OTel Collector 背景運行 ([官方文件](https://docs.cloud.google.com/run/docs/configuring/cpu-allocation)) |
 | `run.googleapis.com/container-dependencies` | 定義容器啟動順序，`{app:[collector]}` 表示 app 依賴 collector，collector 先啟動 |
 | `run.googleapis.com/secrets` | 掛載 Secret Manager 密鑰 |
 | `run.googleapis.com/execution-environment: gen2` | 使用第二代執行環境 |
@@ -356,11 +356,11 @@ metadata:
   name: $SERVICE_NAME
   annotations:
     run.googleapis.com/launch-stage: BETA
-    run.googleapis.com/cpu-throttling: 'false'
 spec:
   template:
     metadata:
       annotations:
+        run.googleapis.com/cpu-throttling: 'false'
         run.googleapis.com/container-dependencies: "{app:[collector]}"
         run.googleapis.com/secrets: "${SECRET_NAME}:projects/${PROJECT_ID}/secrets/${SECRET_NAME}"
         autoscaling.knative.dev/maxScale: "${MAX_INSTANCES}"
@@ -602,11 +602,11 @@ metadata:
   name: $SERVICE_NAME
   annotations:
     run.googleapis.com/launch-stage: BETA
-    run.googleapis.com/cpu-throttling: 'false'
 spec:
   template:
     metadata:
       annotations:
+        run.googleapis.com/cpu-throttling: 'false'
         run.googleapis.com/container-dependencies: "{app:[collector]}"
         run.googleapis.com/secrets: "${SECRET_NAME}:projects/${PROJECT_ID}/secrets/${SECRET_NAME}"
         autoscaling.knative.dev/maxScale: "${MAX_INSTANCES}"

@@ -43,6 +43,8 @@ dependencies {
 	implementation 'org.springframework.cloud:spring-cloud-stream'
 	// 生產環境使用 GCP Pub/Sub
 	implementation "com.google.cloud:spring-cloud-gcp-pubsub-stream-binder"
+	// GCP Secret Manager 整合 (sm@ 語法)
+	implementation "com.google.cloud:spring-cloud-gcp-starter-secretmanager"
 	// 開發環境使用 RabbitMQ (只引入 binder 不含自動配置)
 	implementation 'org.springframework.cloud:spring-cloud-stream-binder-rabbit'
 	implementation "io.cloudevents:cloudevents-spring:4.0.1"

@@ -39,5 +39,7 @@ out/
 
 ### Local Secrets ###
 # 本地機敏設定檔 (不提交到版本控制)
-config/application-secrets.yaml
+config/application-secrets.*
+# 但保留範例檔供參考 (使用 ! 否定模式)
+!config/application-secrets.*.example
 test/

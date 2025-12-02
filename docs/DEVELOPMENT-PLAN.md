@@ -217,6 +217,130 @@ src/test/java/io/github/samzhu/gate/
 
 ---
 
+## 配置設計哲學
+
+### 核心原則：結構與值分離
+
+本專案採用**結構與值分離**的配置設計，讓配置易於理解、管理和審計。
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     配置分層架構                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  YAML 檔案 (結構層)                                              │
+│  ├── 定義完整的配置結構（巢狀屬性、陣列）                          │
+│  ├── 使用 ${placeholder} 引用實際值                              │
+│  └── 人類可讀的 YAML 格式，清楚呈現配置關係                        │
+├─────────────────────────────────────────────────────────────────┤
+│  Properties 檔案 (值層)                                          │
+│  ├── 只包含純粹的 key=value                                      │
+│  ├── 每行一個值，便於管理和審計                                    │
+│  └── 不包含任何結構，只有實際的機敏值                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Profile 雙層架構
+
+| 層級 | Profile | 職責 | 位置 |
+|------|---------|------|------|
+| **基礎設施層** | `local` | RabbitMQ、停用 GCP | `src/main/resources/` |
+| **基礎設施層** | `gcp` | Pub/Sub、啟用 Secret Manager | `src/main/resources/` |
+| **行為層** | `dev` | 本地開發行為、DEBUG 日誌 | `config/` |
+| **行為層** | `lab` | LAB 環境行為、全量取樣 | `config/` |
+| **行為層** | `prod` | 生產環境行為、10% 取樣 | `config/` |
+
+**啟動組合**：
+- 本地開發：`local,dev`（預設）
+- LAB 環境：`gcp,lab`
+- 生產環境：`gcp,prod`
+
+### 一致的 Secret 命名
+
+Secret 名稱在**本地**和 **GCP** 環境保持一致，只有來源不同：
+
+| Secret 名稱 | 本地 (dev) | GCP (lab/prod) |
+|-------------|------------|----------------|
+| `gate-jwt-jwk-set-uri` | `${gate-jwt-jwk-set-uri}` | `${sm@gate-jwt-jwk-set-uri}` |
+| `gate-anthropic-api-key-primary` | `${gate-anthropic-api-key-primary}` | `${sm@gate-anthropic-api-key-primary}` |
+| `gate-anthropic-api-key-secondary` | `${gate-anthropic-api-key-secondary}` | `${sm@gate-anthropic-api-key-secondary}` |
+
+### 本地開發配置流程
+
+```
+application.yaml (基礎配置)
+    │
+    ├── application-local.yaml (基礎設施)
+    │   └── 停用 GCP、停用 Secret Manager、使用 RabbitMQ
+    │
+    └── application-dev.yaml (行為)
+        │
+        ├── spring.config.import: application-secrets.properties
+        │   載入本地機敏設定
+        │
+        ├── spring.security.oauth2.resourceserver.jwt.jwk-set-uri: ${gate-jwt-jwk-set-uri}
+        │   ↓ 從 properties 取得實際值
+        │
+        └── anthropic.api.keys[0].value: ${gate-anthropic-api-key-primary}
+            ↓ 從 properties 取得實際值
+
+application-secrets.properties (機敏值)
+┌────────────────────────────────────────────────────────────────┐
+│ gate-jwt-jwk-set-uri=https://auth-dev.omnihubs.cloud/oauth2/jwks │
+│ gate-anthropic-api-key-primary=sk-ant-api03-xxx                │
+│ gate-anthropic-api-key-secondary=sk-ant-api03-yyy              │
+└────────────────────────────────────────────────────────────────┘
+每行一個值，人類肉眼好管理
+```
+
+### GCP 環境配置流程
+
+```
+application.yaml (基礎配置)
+    │
+    ├── application-gcp.yaml (基礎設施)
+    │   ├── spring.config.import: sm@  ← 啟用 Secret Manager
+    │   └── 使用 Pub/Sub
+    │
+    └── application-lab.yaml (行為)
+        │
+        ├── spring.security.oauth2.resourceserver.jwt.jwk-set-uri: ${sm@gate-jwt-jwk-set-uri}
+        │   ↓ 從 GCP Secret Manager 取得
+        │
+        └── anthropic.api.keys[0].value: ${sm@gate-anthropic-api-key-primary}
+            ↓ 從 GCP Secret Manager 取得
+```
+
+### 設計優勢
+
+1. **關注點分離**
+   - YAML 專注於「結構」：配置項目的階層關係
+   - Properties 專注於「值」：實際的機敏資料
+
+2. **便於審計**
+   - Properties 檔案每行一個值，diff 清晰
+   - 不會因 YAML 縮排變動而產生誤判
+
+3. **環境一致性**
+   - Secret 名稱（`gate-xxx`）在所有環境相同
+   - 減少環境切換時的認知負擔
+
+4. **安全性**
+   - `application-secrets.properties` 加入 `.gitignore`
+   - GCP 環境使用 Secret Manager，無明文儲存
+
+### 相關檔案
+
+| 檔案 | 用途 | Git 狀態 |
+|------|------|----------|
+| `src/main/resources/application-local.yaml` | 本地基礎設施 | 追蹤 |
+| `src/main/resources/application-gcp.yaml` | GCP 基礎設施 | 追蹤 |
+| `config/application-dev.yaml` | 本地開發行為 | 追蹤 |
+| `config/application-lab.yaml` | LAB 環境行為 | 追蹤 |
+| `config/application-secrets.properties` | 本地機敏值 | **忽略** |
+| `config/application-secrets.properties.example` | 模板範例 | 追蹤 |
+
+---
+
 ## 開發優先順序建議
 
 1. **Phase 1 + 2**: 配置與模型（基礎建設）

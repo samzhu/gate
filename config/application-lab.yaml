@@ -1,14 +1,26 @@
 # =============================================================================
 # LAB 環境配置 - 環境行為設定
 # =============================================================================
-# 用途: 實驗/開發環境
-# 啟動: spring.profiles.active=local,lab 或 gcp,lab
-#       (覆蓋 spring.profiles.default)
+# 用途: 實驗/開發環境 (部署於 GCP)
+# 啟動: spring.profiles.active=gcp,lab
 #
-# 注意: 機敏值透過環境變數或 application-secrets.yaml 設定:
-#   - spring.security.oauth2.resourceserver.jwt.jwk-set-uri
-#   - anthropic.api.keys
+# Secret Manager 整合 (由 gcp profile 啟用):
+#   使用 sm@ 語法從 GCP Secret Manager 讀取機敏值
+#   語法: ${sm@secret-name} 或 ${sm@project-id/secret-name/version}
+#   參考: https://googlecloudplatform.github.io/spring-cloud-gcp/7.4.1/reference/html/index.html#secret-manager
+#
+# 必要的 Secrets (需先在 GCP Secret Manager 建立):
+#   - gate-jwt-jwk-set-uri: JWT JWKS 端點 URL
+#   - gate-anthropic-api-key-primary: Anthropic API Key (主要)
+#   - gate-anthropic-api-key-secondary: Anthropic API Key (備用)
 # =============================================================================
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${sm@gate-jwt-jwk-set-uri}
 
 # 可觀測性 - 全量取樣便於除錯
 management:
@@ -18,12 +30,20 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,env,configprops
+        # 注意: 移除 env,configprops 避免洩漏 secrets
+        include: health,info,metrics,prometheus
+
+# Anthropic API 配置
+anthropic:
+  api:
+    keys:
+      - alias: "primary"
+        value: ${sm@gate-anthropic-api-key-primary}
+      - alias: "secondary"
+        value: ${sm@gate-anthropic-api-key-secondary}
 
 # 日誌 - DEBUG 便於開發
 logging:
   level:
     root: INFO
     io.github.samzhu.gate: DEBUG
-    org.springframework.security: DEBUG
-    org.springframework.cloud.gateway: DEBUG

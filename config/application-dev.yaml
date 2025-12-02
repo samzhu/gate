@@ -4,15 +4,30 @@
 # 用途: 本地開發環境
 # 預設: spring.profiles.default=local,dev (自動啟用)
 #
-# 注意: 機敏值透過 application-secrets.yaml 設定:
-#   - spring.security.oauth2.resourceserver.jwt.jwk-set-uri
-#   - anthropic.api.keys
+# 機敏值來源: config/application-secrets.properties
+# 屬性名稱與 GCP Secret Manager 一致，便於管理:
+#   - 本地: ${gate-xxx} 從 properties 檔案讀取
+#   - GCP:  ${sm@gate-xxx} 從 Secret Manager 讀取
 # =============================================================================
 
 spring:
   config:
     # 載入本地機敏設定 (optional: 檔案不存在也不報錯)
-    import: "optional:file:./config/application-secrets.yaml"
+    import: "optional:file:./config/application-secrets.properties"
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${gate-jwt-jwk-set-uri}
+
+# Anthropic API 配置
+anthropic:
+  api:
+    keys:
+      - alias: "primary"
+        value: ${gate-anthropic-api-key-primary}
+      - alias: "secondary"
+        value: ${gate-anthropic-api-key-secondary}
 
 # 可觀測性 - 全量取樣便於除錯
 management:

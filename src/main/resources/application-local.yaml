@@ -16,6 +16,9 @@ spring:
         enabled: false
       pubsub:
         enabled: false
+      # 停用 Secret Manager (本地使用 application-secrets.properties)
+      secretmanager:
+        enabled: false
     stream:
       # 使用 RabbitMQ binder
       default-binder: rabbit
@@ -34,3 +37,4 @@ spring:
       - com.google.cloud.spring.autoconfigure.core.GcpContextAutoConfiguration
       - com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration
       - com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubReactiveAutoConfiguration
+      - com.google.cloud.spring.autoconfigure.secretmanager.GcpSecretManagerAutoConfiguration
