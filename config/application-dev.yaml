@@ -14,20 +14,17 @@ spring:
   config:
     # 載入本地機敏設定 (optional: 檔案不存在也不報錯)
     import: "optional:file:./config/application-secrets.properties"
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          jwk-set-uri: ${gate-jwt-jwk-set-uri}
 
-# Anthropic API 配置
+# Anthropic API 配置 (keys 數量依環境而異)
 anthropic:
   api:
     keys:
       - alias: "primary"
-        value: ${gate-anthropic-api-key-primary}
+        # 預設值供 AOT 編譯使用，執行時由 secrets 覆蓋
+        value: ${gate-anthropic-api-key-primary:placeholder-api-key-primary}
       - alias: "secondary"
-        value: ${gate-anthropic-api-key-secondary}
+        # 預設值供 AOT 編譯使用，執行時由 secrets 覆蓋
+        value: ${gate-anthropic-api-key-secondary:placeholder-api-key-secondary}
 
 # 可觀測性 - 全量取樣便於除錯
 management:

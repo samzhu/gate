@@ -1,26 +1,38 @@
 # =============================================================================
-# LAB 環境配置 - 環境行為設定
+# LAB 環境配置
 # =============================================================================
-# 用途: 實驗/開發環境 (部署於 GCP)
+# 用途: 實驗/開發環境 (部署於 GCP Cloud Run)
 # 啟動: spring.profiles.active=gcp,lab
 #
-# Secret Manager 整合 (由 gcp profile 啟用):
-#   使用 sm@ 語法從 GCP Secret Manager 讀取機敏值
-#   語法: ${sm@secret-name} 或 ${sm@project-id/secret-name/version}
-#   參考: https://googlecloudplatform.github.io/spring-cloud-gcp/7.4.1/reference/html/index.html#secret-manager
+# 部署方式:
+#   1. 此檔案內容存放於 GCP Secret Manager (secret: gate-config)
+#   2. Cloud Run 掛載到 /config/application-lab.yaml
+#   3. Spring Boot 透過 SPRING_CONFIG_ADDITIONAL_LOCATION=file:/config/ 載入
+#
+# Secret 名稱說明:
+#   每個 GCP Project 為獨立環境，因此 secret 名稱不需環境後綴
+#   例如：vibe-lab 專案和 vibe-prod 專案都使用 "gate-config" 名稱
+#
+# Secret Manager 整合:
+#   application-gcp.yaml 已啟用 spring.config.import: sm@
+#   因此 ${sm@secret-name} 語法可用於引用其他 secrets
 #
 # 必要的 Secrets (需先在 GCP Secret Manager 建立):
+#   - gate-config: 此配置檔內容
 #   - gate-jwt-jwk-set-uri: JWT JWKS 端點 URL
-#   - gate-anthropic-api-key-primary: Anthropic API Key (主要)
-#   - gate-anthropic-api-key-secondary: Anthropic API Key (備用)
+#   - gate-anthropic-api-key-primary: Anthropic API Key
 # =============================================================================
 
-spring:
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          jwk-set-uri: ${sm@gate-jwt-jwk-set-uri}
+# 機敏屬性來源 - 從 Secret Manager 讀取，覆蓋 application.yaml 的預設值
+gate-jwt-jwk-set-uri: ${sm@gate-jwt-jwk-set-uri}
+gate-anthropic-api-key-primary: ${sm@gate-anthropic-api-key-primary}
+
+# Anthropic API 配置 (keys 數量依環境調整)
+anthropic:
+  api:
+    keys:
+      - alias: "primary"
+        value: ${gate-anthropic-api-key-primary}
 
 # 可觀測性 - 全量取樣便於除錯
 management:
@@ -32,15 +44,6 @@ management:
       exposure:
         # 注意: 移除 env,configprops 避免洩漏 secrets
         include: health,info,metrics,prometheus
-
-# Anthropic API 配置
-anthropic:
-  api:
-    keys:
-      - alias: "primary"
-        value: ${sm@gate-anthropic-api-key-primary}
-      - alias: "secondary"
-        value: ${sm@gate-anthropic-api-key-secondary}
 
 # 日誌 - DEBUG 便於開發
 logging:

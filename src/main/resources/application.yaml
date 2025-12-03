@@ -12,6 +12,12 @@
 spring:
   application:
     name: gate
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # 預設值供 AOT 編譯使用，執行時由各環境提供 gate-jwt-jwk-set-uri 屬性覆蓋
+          jwk-set-uri: ${gate-jwt-jwk-set-uri:https://placeholder.example.com/.well-known/jwks.json}
   profiles:
     # 預設 profiles（可被 spring.profiles.active 覆蓋）
     # 本地開發: 自動使用 local,dev
@@ -33,10 +39,11 @@ spring:
           destination: llm-gateway-usage
           content-type: application/cloudevents+json
 
-# Anthropic API 配置 (非機敏部分)
+# Anthropic API 配置
 anthropic:
   api:
     base-url: https://api.anthropic.com
+    keys: []
 
 # Resilience4j 配置
 resilience4j:
