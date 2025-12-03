@@ -59,7 +59,7 @@ gcloud projects list
 | `REGION` | Cloud Run 部署區域 | `asia-east1` |
 | `SERVICE_NAME` | Cloud Run 服務名稱 | `gate` |
 | `ENV_PROFILE` | 環境 profile 名稱 | `lab` 或 `prod` |
-| `APP_IMAGE` | 應用程式 Docker 映像 | `spike19820318/gate:0.0.2` |
+| `APP_IMAGE` | 應用程式 Docker 映像 | `spike19820318/gate:0.0.6` |
 | `APP_PORT` | 應用程式監聽埠 | `8080` |
 | `APP_CPU` | 應用程式 CPU 限制 | `1000m` |
 | `APP_MEMORY` | 應用程式記憶體限制 | `1Gi` |
@@ -98,7 +98,7 @@ export CONFIG_SECRET_NAME="gate-config"
 # ==================================================
 # 應用程式容器設定
 # ==================================================
-export APP_IMAGE="spike19820318/gate:0.0.2"
+export APP_IMAGE="spike19820318/gate:0.0.6"
 export APP_PORT="8080"
 export APP_CPU="1000m"
 export APP_MEMORY="1Gi"
@@ -874,7 +874,7 @@ gcloud run services logs read $SERVICE_NAME --region=$REGION --limit=50
 gcloud run services describe $SERVICE_NAME --region=$REGION
 
 # 更新映像版本
-export APP_IMAGE="spike19820318/gate:0.0.3"
+export APP_IMAGE="spike19820318/gate:0.0.6"
 # 然後重新執行 Step 8 (Cloud Run YAML) 和 Step 10 (部署)
 
 # 刪除服務
