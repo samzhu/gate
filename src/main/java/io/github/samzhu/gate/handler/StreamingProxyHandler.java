@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.function.ServerResponse;
 
 import io.micrometer.tracing.Tracer;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.github.samzhu.gate.config.AnthropicProperties;
 import io.github.samzhu.gate.model.UsageEventData;

@@ -16,8 +16,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.function.ServerResponse;
 
 import io.micrometer.tracing.Tracer;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.github.samzhu.gate.config.AnthropicProperties;
 import io.github.samzhu.gate.model.UsageEventData;
@@ -163,17 +163,17 @@ public class NonStreamingProxyHandler {
 
             // 提取 model
             if (root.has("model")) {
-                builder.model(root.get("model").stringValue());
+                builder.model(root.get("model").asText());
             }
 
             // 提取 message id
             if (root.has("id")) {
-                builder.messageId(root.get("id").stringValue());
+                builder.messageId(root.get("id").asText());
             }
 
             // 提取 stop_reason
             if (root.has("stop_reason") && !root.get("stop_reason").isNull()) {
-                builder.stopReason(root.get("stop_reason").stringValue());
+                builder.stopReason(root.get("stop_reason").asText());
             }
 
             // 提取 usage
@@ -198,7 +198,7 @@ public class NonStreamingProxyHandler {
             if (root.has("error")) {
                 JsonNode error = root.get("error");
                 if (error.has("type")) {
-                    builder.errorType(error.get("type").stringValue());
+                    builder.errorType(error.get("type").asText());
                 }
             }
 
