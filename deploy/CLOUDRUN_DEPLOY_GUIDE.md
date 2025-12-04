@@ -28,6 +28,18 @@
 
 ---
 
+## 部署流程總覽
+
+| 階段 | 步驟 | 說明 |
+|------|------|------|
+| **環境設定** | Step 0-4 | 確認環境、設定變數、啟用 API、建立服務帳戶 |
+| **準備檔案** | Step 5-6 | 建立工作目錄、準備 OTel 與應用程式配置檔 |
+| **建立 Secrets** | Step 7 | 將所有配置檔與機敏值存入 Secret Manager |
+| **建立部署檔** | Step 8 | 產生 Cloud Run Service YAML |
+| **部署與驗證** | Step 9-11 | 部署服務、設定存取權限、驗證結果 |
+
+---
+
 ## Step 0: 確認 gcloud 環境
 
 ```bash
@@ -164,7 +176,7 @@ gcloud config set project $PROJECT_ID
 | API | 說明 |
 |-----|------|
 | `run.googleapis.com` | Cloud Run 服務，用於部署和執行容器 |
-| `secretmanager.googleapis.com` | Secret Manager，安全儲存 OTel Collector 配置 |
+| `secretmanager.googleapis.com` | Secret Manager，安全儲存配置檔與機敏值 |
 | `cloudtrace.googleapis.com` | Cloud Trace，收集分散式追蹤資料 |
 | `monitoring.googleapis.com` | Cloud Monitoring，收集指標資料 |
 | `logging.googleapis.com` | Cloud Logging，收集日誌資料 |
@@ -187,15 +199,8 @@ gcloud services enable \
 ### 4.1 檢查服務帳戶是否已存在
 
 ```bash
-gcloud iam service-accounts describe $SERVICE_ACCOUNT
+gcloud iam service-accounts describe $SERVICE_ACCOUNT 2>/dev/null || echo "服務帳戶不存在，將建立新的"
 ```
-
-Output:
-```bash
-ERROR: (gcloud.iam.service-accounts.describe) NOT_FOUND: Unknown service account....
-```
-
-> 如果顯示 `NOT_FOUND` 錯誤，表示服務帳戶不存在，請繼續建立。
 
 ### 4.2 建立服務帳戶
 
@@ -204,11 +209,6 @@ gcloud iam service-accounts create $SERVICE_ACCOUNT_ID \
   --display-name="Cloud Run Service Account for ${SERVICE_NAME}" \
   --description="Service account for ${SERVICE_NAME} on Cloud Run" \
   --project=$PROJECT_ID
-```
-
-Output:
-```bash
-Created service account [gate-sa].
 ```
 
 ### 4.3 授予必要角色
@@ -255,7 +255,11 @@ mkdir -p ~/cloudrun-deploy && cd ~/cloudrun-deploy
 
 ---
 
-## Step 6: 建立 OTel Collector 配置
+## Step 6: 準備配置檔
+
+在此步驟準備所有配置檔，下一步會統一存入 Secret Manager。
+
+### 6.1 建立 OTel Collector 配置檔
 
 建立 OpenTelemetry Collector 配置檔，定義如何接收、處理和導出遙測資料：
 
@@ -314,32 +318,24 @@ service:
       processors: [memory_limiter, resourcedetection, batch]
       exporters: [googlecloud]
 EOF
+
+echo "✅ 已建立 otel-collector-config.yaml"
 ```
 
----
+### 6.2 建立應用程式配置檔
 
-## Step 7: 準備應用程式配置
+此配置檔會被 Cloud Run 掛載到 `/config/application-{profile}.yaml`，Spring Boot 透過 `spring.config.additional-location` 自動載入。
 
-將 `application-{profile}.yaml` 配置檔內容準備好，稍後會存入 Secret Manager。
+> **注意**: 配置檔中使用 `${sm@secret-name}` 語法，讓 Spring Cloud GCP 在執行時從 Secret Manager 讀取機敏值。
 
-### 配置檔說明
+```bash
+cat > application-${ENV_PROFILE}.yaml << 'APPEOF'
+# =============================================================================
+# 應用程式配置 - 環境特定設定
+# =============================================================================
+# 此檔案透過 Secret Manager 掛載到 /config/
+# 機敏值使用 ${sm@secret-name} 語法，由 Spring Cloud GCP 在執行時解析
 
-此配置檔會被 Cloud Run 掛載到 `/config/application-{profile}.yaml`，Spring Boot 透過 `SPRING_CONFIG_ADDITIONAL_LOCATION` 自動載入。
-
-**配置檔位置**: `config/application-lab.yaml` (或對應環境的配置檔)
-
-**必要的 Secrets** (需先在 Secret Manager 建立):
-
-| Secret 名稱 | 說明 |
-|------------|------|
-| `gate-config` | 此配置檔內容 |
-| `gate-jwt-jwk-set-uri` | JWT JWKS 端點 URL |
-| `gate-anthropic-api-key-primary` | Anthropic API Key |
-
-### 配置檔範例
-
-```yaml
-# application-lab.yaml
 # 機敏屬性來源 - 從 Secret Manager 讀取
 gate-jwt-jwk-set-uri: ${sm@gate-jwt-jwk-set-uri}
 gate-anthropic-api-key-primary: ${sm@gate-anthropic-api-key-primary}
@@ -366,31 +362,102 @@ logging:
   level:
     root: INFO
     io.github.samzhu.gate: DEBUG
+APPEOF
+
+echo "✅ 已建立 application-${ENV_PROFILE}.yaml"
 ```
 
-### 建立機敏值 Secrets
+### 6.3 確認配置檔已建立
 
 ```bash
-# 建立 JWT JWKS URL secret
+ls -la *.yaml
+```
+
+---
+
+## Step 7: 建立 Secret Manager 密鑰
+
+將所有配置檔與機敏值存入 Secret Manager。
+
+### 7.1 建立機敏值 Secrets
+
+這些 secrets 包含實際的機敏資料，會被應用程式配置檔透過 `${sm@secret-name}` 語法引用。
+
+```bash
+# 建立 JWT JWKS URL secret (請替換為實際值)
 echo -n "https://your-auth-server.com/.well-known/jwks.json" | \
   gcloud secrets create gate-jwt-jwk-set-uri \
     --data-file=- \
     --replication-policy="automatic" \
     --project=$PROJECT_ID
 
-# 建立 Anthropic API Key secret
+# 建立 Anthropic API Key secret (請替換為實際值)
 echo -n "sk-ant-api03-your-api-key" | \
   gcloud secrets create gate-anthropic-api-key-primary \
     --data-file=- \
     --replication-policy="automatic" \
     --project=$PROJECT_ID
+
+echo "✅ 機敏值 Secrets 已建立"
+```
+
+完成後可驗證：
+
+```bash
+gcloud secrets list
+```
+
+### 7.2 建立 OTel Collector 配置 Secret
+
+```bash
+gcloud secrets describe $OTEL_SECRET_NAME --project=$PROJECT_ID 2>/dev/null && \
+  gcloud secrets versions add $OTEL_SECRET_NAME --data-file=otel-collector-config.yaml --project=$PROJECT_ID || \
+  gcloud secrets create $OTEL_SECRET_NAME --data-file=otel-collector-config.yaml --replication-policy="automatic" --project=$PROJECT_ID
+```
+
+Output:
+```
+createTime: '2025-12-02T06:43:28.310330Z'
+etag: '"1644f269e76f76"'
+name: projects/644359853825/secrets/otel-collector-config
+replication:
+  automatic: {}
+Created version [2] of the secret [otel-collector-config].
+```
+
+### 7.3 建立應用程式配置 Secret
+
+```bash
+gcloud secrets describe $CONFIG_SECRET_NAME --project=$PROJECT_ID 2>/dev/null && \
+  gcloud secrets versions add $CONFIG_SECRET_NAME --data-file=application-${ENV_PROFILE}.yaml --project=$PROJECT_ID || \
+  gcloud secrets create $CONFIG_SECRET_NAME --data-file=application-${ENV_PROFILE}.yaml --replication-policy="automatic" --project=$PROJECT_ID
+```
+
+Output:
+```
+Created version [1] of the secret [gate-config].
+```
+
+### 7.4 驗證所有 Secrets
+
+```bash
+echo "=== Secrets 清單 ==="
+gcloud secrets list --project=$PROJECT_ID --filter="name~gate"
+
+echo ""
+echo "=== OTel 配置版本 ==="
+gcloud secrets versions list $OTEL_SECRET_NAME --project=$PROJECT_ID
+
+echo ""
+echo "=== 應用程式配置版本 ==="
+gcloud secrets versions list $CONFIG_SECRET_NAME --project=$PROJECT_ID
 ```
 
 ---
 
 ## Step 8: 建立 Cloud Run Service YAML
 
-建立 Cloud Run 服務定義，包含主應用容器和 OTel Collector Sidecar：
+建立 Cloud Run 服務定義，包含主應用容器和 OTel Collector Sidecar。
 
 ### 關鍵 Annotations 說明
 
@@ -458,8 +525,8 @@ spec:
           env:
             - name: spring.profiles.active
               value: "gcp,$ENV_PROFILE"
-            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
-              value: "file:/config/"
+            - name: spring.config.additional-location
+              value: "optional:file:/config/"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://localhost:4318"
           resources:
@@ -531,85 +598,7 @@ EOF
 
 ---
 
-## Step 9: 建立 Secret Manager 密鑰
-
-將配置檔存入 Secret Manager，供 Cloud Run 掛載使用。
-
-### 9.1 建立 OTel Collector 配置 Secret
-
-```bash
-# 檢查是否存在
-gcloud secrets describe $OTEL_SECRET_NAME --project=$PROJECT_ID 2>/dev/null && \
-  gcloud secrets versions add $OTEL_SECRET_NAME --data-file=otel-collector-config.yaml --project=$PROJECT_ID || \
-  gcloud secrets create $OTEL_SECRET_NAME --data-file=otel-collector-config.yaml --replication-policy="automatic" --project=$PROJECT_ID
-```
-
-### 9.2 建立應用程式配置 Secret
-
-從專案的 `config/application-${ENV_PROFILE}.yaml` 建立 secret：
-
-```bash
-# 方法 A: 從本機檔案建立 (如果有 clone 專案)
-gcloud secrets describe $CONFIG_SECRET_NAME --project=$PROJECT_ID 2>/dev/null && \
-  gcloud secrets versions add $CONFIG_SECRET_NAME --data-file=config/application-${ENV_PROFILE}.yaml --project=$PROJECT_ID || \
-  gcloud secrets create $CONFIG_SECRET_NAME --data-file=config/application-${ENV_PROFILE}.yaml --replication-policy="automatic" --project=$PROJECT_ID
-```
-
-或者直接在 Cloud Shell 建立：
-
-```bash
-# 方法 B: 在 Cloud Shell 建立配置檔
-cat > application-${ENV_PROFILE}.yaml << 'APPEOF'
-# 機敏屬性來源 - 從 Secret Manager 讀取
-gate-jwt-jwk-set-uri: ${sm@gate-jwt-jwk-set-uri}
-gate-anthropic-api-key-primary: ${sm@gate-anthropic-api-key-primary}
-
-# Anthropic API 配置
-anthropic:
-  api:
-    keys:
-      - alias: "primary"
-        value: ${gate-anthropic-api-key-primary}
-
-# 可觀測性
-management:
-  tracing:
-    sampling:
-      probability: 1.0
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics,prometheus
-
-# 日誌
-logging:
-  level:
-    root: INFO
-    io.github.samzhu.gate: DEBUG
-APPEOF
-
-# 建立/更新 secret
-gcloud secrets describe $CONFIG_SECRET_NAME --project=$PROJECT_ID 2>/dev/null && \
-  gcloud secrets versions add $CONFIG_SECRET_NAME --data-file=application-${ENV_PROFILE}.yaml --project=$PROJECT_ID || \
-  gcloud secrets create $CONFIG_SECRET_NAME --data-file=application-${ENV_PROFILE}.yaml --replication-policy="automatic" --project=$PROJECT_ID
-```
-
-### 9.3 驗證所有 Secrets
-
-```bash
-echo "=== Secrets 清單 ==="
-gcloud secrets list --project=$PROJECT_ID
-
-echo "=== OTel 配置版本 ==="
-gcloud secrets versions list $OTEL_SECRET_NAME --project=$PROJECT_ID
-
-echo "=== 應用程式配置版本 ==="
-gcloud secrets versions list $CONFIG_SECRET_NAME --project=$PROJECT_ID
-```
-
----
-
-## Step 10: 部署 Cloud Run 服務
+## Step 9: 部署 Cloud Run 服務
 
 使用 `gcloud run services replace` 部署或更新服務：
 
@@ -621,7 +610,7 @@ gcloud run services replace cloudrun-service.yaml \
 
 ---
 
-## Step 11: 設定公開存取 (選用)
+## Step 10: 設定公開存取 (選用)
 
 允許未經驗證的請求存取服務 (適用於公開 API)：
 
@@ -636,9 +625,9 @@ gcloud run services add-iam-policy-binding $SERVICE_NAME \
 
 ---
 
-## Step 12: 驗證部署
+## Step 11: 驗證部署
 
-### 12.1 取得服務 URL
+### 11.1 取得服務 URL
 
 Cloud Run 提供兩種 URL 格式：
 
@@ -650,13 +639,14 @@ Cloud Run 提供兩種 URL 格式：
 ```bash
 # Deterministic URL (與 Console 顯示一致)
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
-echo "https://${SERVICE_NAME}-${PROJECT_NUMBER}.${REGION}.run.app"
+SERVICE_URL="https://${SERVICE_NAME}-${PROJECT_NUMBER}.${REGION}.run.app"
+echo "Service URL: $SERVICE_URL"
 ```
 
-### 12.2 健康檢查
+### 11.2 健康檢查
 
 ```bash
-curl -s "https://${SERVICE_NAME}-${PROJECT_NUMBER}.${REGION}.run.app/actuator/health" | jq .
+curl -s "${SERVICE_URL}/actuator/health" | jq .
 ```
 
 ---
@@ -669,7 +659,8 @@ curl -s "https://${SERVICE_NAME}-${PROJECT_NUMBER}.${REGION}.run.app/actuator/he
 # 確保已設定所有變數後執行
 cd ~/cloudrun-deploy && \
 
-# ========== 建立 OTel Collector 配置 ==========
+# ========== Step 6: 建立配置檔 ==========
+# OTel Collector 配置
 cat > otel-collector-config.yaml << EOF
 receivers:
   otlp:
@@ -715,25 +706,17 @@ service:
       exporters: [googlecloud]
 EOF
 
-# 建立/更新 OTel Secret
-gcloud secrets describe $OTEL_SECRET_NAME --project=$PROJECT_ID 2>/dev/null && \
-  gcloud secrets versions add $OTEL_SECRET_NAME --data-file=otel-collector-config.yaml --project=$PROJECT_ID || \
-  gcloud secrets create $OTEL_SECRET_NAME --data-file=otel-collector-config.yaml --replication-policy="automatic" --project=$PROJECT_ID
-
-# ========== 建立應用程式配置 ==========
+# 應用程式配置
 cat > application-${ENV_PROFILE}.yaml << 'APPEOF'
-# 機敏屬性來源 - 從 Secret Manager 讀取
 gate-jwt-jwk-set-uri: ${sm@gate-jwt-jwk-set-uri}
 gate-anthropic-api-key-primary: ${sm@gate-anthropic-api-key-primary}
 
-# Anthropic API 配置
 anthropic:
   api:
     keys:
       - alias: "primary"
         value: ${gate-anthropic-api-key-primary}
 
-# 可觀測性
 management:
   tracing:
     sampling:
@@ -743,19 +726,24 @@ management:
       exposure:
         include: health,info,metrics,prometheus
 
-# 日誌
 logging:
   level:
     root: INFO
     io.github.samzhu.gate: DEBUG
 APPEOF
 
-# 建立/更新應用程式配置 Secret
+# ========== Step 7: 建立 Secrets ==========
+# OTel Collector 配置 Secret
+gcloud secrets describe $OTEL_SECRET_NAME --project=$PROJECT_ID 2>/dev/null && \
+  gcloud secrets versions add $OTEL_SECRET_NAME --data-file=otel-collector-config.yaml --project=$PROJECT_ID || \
+  gcloud secrets create $OTEL_SECRET_NAME --data-file=otel-collector-config.yaml --replication-policy="automatic" --project=$PROJECT_ID
+
+# 應用程式配置 Secret
 gcloud secrets describe $CONFIG_SECRET_NAME --project=$PROJECT_ID 2>/dev/null && \
   gcloud secrets versions add $CONFIG_SECRET_NAME --data-file=application-${ENV_PROFILE}.yaml --project=$PROJECT_ID || \
   gcloud secrets create $CONFIG_SECRET_NAME --data-file=application-${ENV_PROFILE}.yaml --replication-policy="automatic" --project=$PROJECT_ID
 
-# ========== 建立 Cloud Run 服務 YAML ==========
+# ========== Step 8: 建立 Cloud Run 服務 YAML ==========
 cat > cloudrun-service.yaml << EOF
 apiVersion: serving.knative.dev/v1
 kind: Service
@@ -786,8 +774,8 @@ spec:
           env:
             - name: spring.profiles.active
               value: "gcp,$ENV_PROFILE"
-            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
-              value: "file:/config/"
+            - name: spring.config.additional-location
+              value: "optional:file:/config/"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://localhost:4318"
           resources:
@@ -856,7 +844,7 @@ spec:
       latestRevision: true
 EOF
 
-# ========== 部署 ==========
+# ========== Step 9: 部署 ==========
 gcloud run services replace cloudrun-service.yaml --region=$REGION --project=$PROJECT_ID
 
 echo "✅ 部署完成: $(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)')"
@@ -874,8 +862,8 @@ gcloud run services logs read $SERVICE_NAME --region=$REGION --limit=50
 gcloud run services describe $SERVICE_NAME --region=$REGION
 
 # 更新映像版本
-export APP_IMAGE="spike19820318/gate:0.0.6"
-# 然後重新執行 Step 8 (Cloud Run YAML) 和 Step 10 (部署)
+export APP_IMAGE="spike19820318/gate:0.0.7"
+# 然後重新執行 Step 8 (Cloud Run YAML) 和 Step 9 (部署)
 
 # 刪除服務
 gcloud run services delete $SERVICE_NAME --region=$REGION --quiet
