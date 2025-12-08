@@ -6,11 +6,16 @@
 #
 # 此 profile 只負責基礎設施配置 (MQ binder)
 # 機敏設定由 dev profile 的 spring.config.import 載入
+#
+# 重要: 不要使用 spring.autoconfigure.exclude 排除 GCP 類別
+#       這會導致 GraalVM Native Image AOT 編譯時無法註冊 Pub/Sub Binder
+#       改用 spring.cloud.gcp.*.enabled=false 來禁用功能
 # =============================================================================
 
 spring:
   cloud:
-    # 停用 GCP 自動配置
+    # 停用 GCP 功能 (透過 property 而非 autoconfigure.exclude)
+    # 這樣 AOT 編譯時仍會註冊 Pub/Sub Binder，但本地開發時不會啟用
     gcp:
       core:
         enabled: false
@@ -31,10 +36,3 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
-  # 停用 GCP 自動配置 (排除自動配置類)
-  autoconfigure:
-    exclude:
-      - com.google.cloud.spring.autoconfigure.core.GcpContextAutoConfiguration
-      - com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubAutoConfiguration
-      - com.google.cloud.spring.autoconfigure.pubsub.GcpPubSubReactiveAutoConfiguration
-      - com.google.cloud.spring.autoconfigure.secretmanager.GcpSecretManagerAutoConfiguration

@@ -25,6 +25,14 @@ spring:
   config:
     import: sm@
   cloud:
+    # 明確啟用 GCP 功能 (覆蓋 local profile 的 enabled: false)
+    gcp:
+      core:
+        enabled: true
+      pubsub:
+        enabled: true
+      secretmanager:
+        enabled: true
     stream:
       bindings:
         usageEvent-out-0:
