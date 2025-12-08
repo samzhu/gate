@@ -51,6 +51,8 @@ public class UsageEventPublisher {
     public UsageEventPublisher(StreamBridge streamBridge, ObjectMapper objectMapper) {
         this.streamBridge = streamBridge;
         this.objectMapper = objectMapper;
+        log.info("UsageEventPublisher initialized: bindingName={}, streamBridge={}",
+            BINDING_NAME, streamBridge.getClass().getSimpleName());
     }
 
     /**
@@ -90,7 +92,10 @@ public class UsageEventPublisher {
             }
         } catch (Exception e) {
             // Pub/Sub 發送失敗不應影響主要代理功能
-            log.error("Error publishing usage event: {}", e.getMessage(), e);
+            // 記錄詳細錯誤資訊以便排查 Binder 問題
+            String rootCause = e.getCause() != null ? e.getCause().getClass().getSimpleName() : "N/A";
+            log.error("Error publishing usage event: type={}, message={}, rootCause={}, binding={}",
+                e.getClass().getSimpleName(), e.getMessage(), rootCause, BINDING_NAME, e);
         }
     }
 }

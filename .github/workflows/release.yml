@@ -43,6 +43,10 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and Push Native Docker Image
+        env:
+          # AOT 編譯時使用 aot profile，確保 RabbitMQ 和 Pub/Sub Binder 都被正確註冊
+          # 執行時 profile 由 Cloud Run 環境變數覆蓋 (gcp,lab 或 gcp,prod)
+          SPRING_PROFILES_ACTIVE: aot
         run: |
           ./gradlew bootBuildImage \
             --imageName=docker.io/${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }} \

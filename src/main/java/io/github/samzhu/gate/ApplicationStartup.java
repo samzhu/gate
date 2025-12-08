@@ -119,6 +119,15 @@ public class ApplicationStartup {
         // 可觀測性設定
         String tracingSampling = env.getProperty("management.tracing.sampling.probability", "N/A");
 
+        // Spring Cloud Stream 設定
+        String streamDefaultBinder = env.getProperty("spring.cloud.stream.default-binder", "auto");
+        String usageEventBinder = env.getProperty("spring.cloud.stream.bindings.usageEvent-out-0.binder", streamDefaultBinder);
+        String usageEventDestination = env.getProperty("spring.cloud.stream.bindings.usageEvent-out-0.destination", "N/A");
+
+        // GCP 設定
+        String gcpPubsubEnabled = env.getProperty("spring.cloud.gcp.pubsub.enabled", "true");
+        String gcpProjectId = env.getProperty("spring.cloud.gcp.project-id", "auto-detect");
+
         log.info("""
 
             ----------------------------------------------------------
@@ -143,6 +152,15 @@ public class ApplicationStartup {
             ----------------------------------------------------------
             \t可觀測性：
             \t  Tracing 取樣率：{}
+            ----------------------------------------------------------
+            \tSpring Cloud Stream：
+            \t  Default Binder：{}
+            \t  usageEvent Binder：{}
+            \t  usageEvent Topic：{}
+            ----------------------------------------------------------
+            \tGCP 配置：
+            \t  Pub/Sub 啟用：{}
+            \t  Project ID：{}
             ----------------------------------------------------------""",
             applicationName,
             protocol,
@@ -161,7 +179,12 @@ public class ApplicationStartup {
             javaVendor,
             maxMemoryMB,
             availableProcessors,
-            tracingSampling
+            tracingSampling,
+            streamDefaultBinder,
+            usageEventBinder,
+            usageEventDestination,
+            gcpPubsubEnabled,
+            gcpProjectId
         );
     }
 }

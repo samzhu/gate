@@ -7,23 +7,37 @@
 ## 架構圖
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Cloud Run Service                       │
-│  ┌──────────────────┐    OTLP     ┌───────────────────────┐ │
-│  │   App Container  │ ──────────► │  OTel Collector       │ │
-│  │   (port 8080)    │  :4317/4318 │  Sidecar              │ │
-│  └──────────────────┘             └───────────┬───────────┘ │
-└───────────────────────────────────────────────┼─────────────┘
-                                                │
-                    ┌───────────────────────────┼───────────────┐
-                    │                           ▼               │
-                    │   ┌─────────────────────────────────────┐ │
-                    │   │         Google Cloud                 │ │
-                    │   │  • Cloud Trace (追蹤)               │ │
-                    │   │  • Cloud Monitoring (指標)          │ │
-                    │   │  • Cloud Logging (日誌)             │ │
-                    │   └─────────────────────────────────────┘ │
-                    └───────────────────────────────────────────┘
+                            ┌─────────────────────────────────────────────────────────────┐
+         Ingress            │                      Cloud Run Service                       │
+      ────────────────────► │  ┌──────────────────┐    OTLP     ┌───────────────────────┐ │
+                            │  │   App Container  │ ──────────► │  OTel Collector       │ │
+                            │  │   (port 8080)    │  :4317/4318 │  Sidecar              │ │
+                            │  └────────┬─────────┘             └───────────┬───────────┘ │
+                            └───────────┼───────────────────────────────────┼─────────────┘
+                                        │                                   │
+                                        │ Direct VPC Egress (選用)          │
+                                        ▼                                   │
+                            ┌───────────────────────────────────┐           │
+                            │         VPC Network               │           │
+                            │   ┌───────────────────────────┐   │           │
+                            │   │  Subnet (100.64.0.0/24)   │   │           │
+                            │   └─────────────┬─────────────┘   │           │
+                            └─────────────────┼─────────────────┘           │
+                                              │                             │
+                            ┌─────────────────┼─────────────────┐           │
+                            │  Cloud Router + Cloud NAT        │           │
+                            │  (Static IP: gate-egress-ip)     │           │
+                            └─────────────────┬─────────────────┘           │
+                                              │ 固定 IP 出口                │
+                    ┌─────────────────────────┼─────────────────────────────┼───────────────┐
+                    │                         ▼                             ▼               │
+                    │   ┌────────────────────────────┐  ┌─────────────────────────────────┐ │
+                    │   │     External APIs          │  │         Google Cloud            │ │
+                    │   │  (需要 IP 白名單的服務)    │  │  • Cloud Trace (追蹤)           │ │
+                    │   │                            │  │  • Cloud Monitoring (指標)      │ │
+                    │   │                            │  │  • Cloud Logging (日誌)         │ │
+                    │   └────────────────────────────┘  └─────────────────────────────────┘ │
+                    └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -32,7 +46,10 @@
 
 | 階段 | 步驟 | 說明 |
 |------|------|------|
-| **環境設定** | Step 0-4 | 確認環境、設定變數、啟用 API、建立服務帳戶 |
+| **環境設定** | Step 0-3 | 確認環境、設定變數、啟用 API |
+| **Pub/Sub 設定** | Step 3-A | 建立 Pub/Sub Topic (用量事件) |
+| **服務帳戶** | Step 4 | 建立服務帳戶並授權 (含 Pub/Sub Publisher) |
+| **固定出口 IP** | Step 4-A | (選用) 建立 VPC、Subnet、Cloud NAT 與靜態 IP |
 | **準備檔案** | Step 5-6 | 建立工作目錄、準備 OTel 與應用程式配置檔 |
 | **建立 Secrets** | Step 7 | 將所有配置檔與機敏值存入 Secret Manager |
 | **建立部署檔** | Step 8 | 產生 Cloud Run Service YAML |
@@ -71,7 +88,7 @@ gcloud projects list
 | `REGION` | Cloud Run 部署區域 | `asia-east1` |
 | `SERVICE_NAME` | Cloud Run 服務名稱 | `gate` |
 | `ENV_PROFILE` | 環境 profile 名稱 | `lab` 或 `prod` |
-| `APP_IMAGE` | 應用程式 Docker 映像 | `spike19820318/gate:0.0.6` |
+| `APP_IMAGE` | 應用程式 Docker 映像 | `spike19820318/gate:0.0.8` |
 | `APP_PORT` | 應用程式監聽埠 | `8080` |
 | `APP_CPU` | 應用程式 CPU 限制 | `1000m` |
 | `APP_MEMORY` | 應用程式記憶體限制 | `1Gi` |
@@ -84,6 +101,12 @@ gcloud projects list
 | `OTEL_SECRET_NAME` | OTel Collector 配置密鑰名稱 | `otel-collector-config` |
 | `CONFIG_SECRET_NAME` | 應用程式配置密鑰名稱 | `gate-config` |
 | `SERVICE_ACCOUNT_ID` | 服務帳戶 ID | `gate-sa` |
+| `VPC_NETWORK` | (選用) VPC 網路名稱 | `gate-vpc` |
+| `SUBNET_NAME` | (選用) 子網路名稱 | `gate-subnet` |
+| `SUBNET_RANGE` | (選用) 子網路 CIDR | `100.64.0.0/24` |
+| `ROUTER_NAME` | (選用) Cloud Router 名稱 | `gate-router` |
+| `NAT_NAME` | (選用) Cloud NAT 名稱 | `gate-nat` |
+| `STATIC_IP_NAME` | (選用) 靜態 IP 名稱 | `gate-egress-ip` |
 
 ### 設定變數
 
@@ -110,7 +133,7 @@ export CONFIG_SECRET_NAME="gate-config"
 # ==================================================
 # 應用程式容器設定
 # ==================================================
-export APP_IMAGE="spike19820318/gate:0.0.6"
+export APP_IMAGE="spike19820318/gate:0.0.9"
 export APP_PORT="8080"
 export APP_CPU="1000m"
 export APP_MEMORY="1Gi"
@@ -140,6 +163,21 @@ export CONTAINER_CONCURRENCY="80"
 # ==================================================
 export SERVICE_ACCOUNT_ID="gate-sa"
 export SERVICE_ACCOUNT="${SERVICE_ACCOUNT_ID}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# ==================================================
+# (選用) 固定出口 IP 設定 - 如需要固定 IP 才設定
+# ==================================================
+# VPC 網路設定
+export VPC_NETWORK="gate-vpc"
+export SUBNET_NAME="gate-subnet"
+# Subnet CIDR: 使用 RFC 6598 範圍，/24 提供 252 個可用 IP
+# - /26 (60 IP): 最小需求，支援約 25 instances
+# - /24 (252 IP): 推薦，支援約 120 instances
+export SUBNET_RANGE="100.64.0.0/24"
+# Cloud Router + NAT 設定
+export ROUTER_NAME="gate-router"
+export NAT_NAME="gate-nat"
+export STATIC_IP_NAME="gate-egress-ip"
 
 # 驗證變數
 echo "=========================================="
@@ -181,6 +219,8 @@ gcloud config set project $PROJECT_ID
 | `monitoring.googleapis.com` | Cloud Monitoring，收集指標資料 |
 | `logging.googleapis.com` | Cloud Logging，收集日誌資料 |
 | `iam.googleapis.com` | IAM，管理服務帳戶和權限 |
+| `pubsub.googleapis.com` | Pub/Sub，用於發送用量事件訊息 |
+| `compute.googleapis.com` | (選用) Compute Engine，用於 VPC/NAT 設定 |
 
 ```bash
 gcloud services enable \
@@ -189,8 +229,46 @@ gcloud services enable \
   cloudtrace.googleapis.com \
   monitoring.googleapis.com \
   logging.googleapis.com \
-  iam.googleapis.com
+  iam.googleapis.com \
+  pubsub.googleapis.com \
+  compute.googleapis.com
 ```
+
+---
+
+## Step 3-A: Pub/Sub Topic 說明
+
+應用程式使用 Spring Cloud GCP Pub/Sub Stream Binder 發送用量事件到 Topic `llm-gateway-usage`。
+
+### 自動建立 vs 手動建立
+
+| 方式 | 說明 | 所需權限 | 建議環境 |
+|------|------|----------|----------|
+| **選項 A: 自動建立** | 應用程式首次發送訊息時自動建立 Topic | `roles/pubsub.editor` | 開發/測試 |
+| **選項 B: 手動建立** | 預先建立 Topic，應用程式只負責發送 | `roles/pubsub.publisher` | 生產環境 |
+
+### 選項 A: 自動建立
+
+不需要手動建立 Topic，應用程式會在首次發送訊息時自動建立。
+
+→ 權限設定請見 **Step 4.4**（選擇 `roles/pubsub.editor`）
+
+### 選項 B: 手動建立 (建議生產環境)
+
+預先建立 Topic，符合最小權限原則：
+
+```bash
+# 建立 Pub/Sub Topic
+gcloud pubsub topics create llm-gateway-usage --project=$PROJECT_ID
+
+echo "✅ Pub/Sub Topic 已建立: llm-gateway-usage"
+```
+
+→ 權限設定請見 **Step 4.4**（選擇 `roles/pubsub.publisher`）
+
+> **Topic 名稱說明**:
+> - 名稱 `llm-gateway-usage` 定義在 `application.yaml` 的 `spring.cloud.stream.bindings.usageEvent-out-0.destination`
+> - 應用程式啟動時會自動連接此 Topic
 
 ---
 
@@ -214,7 +292,7 @@ gcloud iam service-accounts create $SERVICE_ACCOUNT_ID \
 ### 4.3 授予必要角色
 
 ```bash
-# Cloud Run 執行所需的最小權限
+# Cloud Run 執行所需的基本權限
 for ROLE in \
   "roles/logging.logWriter" \
   "roles/monitoring.metricWriter" \
@@ -229,10 +307,30 @@ do
     --quiet
 done
 
-echo "✅ 權限設定完成"
+echo "✅ 基本權限設定完成"
 ```
 
-### 4.4 驗證服務帳戶
+### 4.4 授予 Pub/Sub 權限
+
+根據 Step 3-A 選擇的方式授予對應權限：
+
+```bash
+# 選項 A: 自動建立 Topic (開發/測試環境)
+PUBSUB_ROLE="roles/pubsub.editor"
+
+# 選項 B: 手動建立 Topic (生產環境，最小權限)
+# PUBSUB_ROLE="roles/pubsub.publisher"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:$SERVICE_ACCOUNT" \
+  --role="$PUBSUB_ROLE" \
+  --condition=None \
+  --quiet
+
+echo "✅ Pub/Sub 權限設定完成: $PUBSUB_ROLE"
+```
+
+### 4.5 驗證服務帳戶
 
 ```bash
 # 查看服務帳戶資訊
@@ -243,6 +341,118 @@ gcloud projects get-iam-policy $PROJECT_ID \
   --flatten="bindings[].members" \
   --filter="bindings.members:$SERVICE_ACCOUNT" \
   --format="table(bindings.role)"
+```
+
+---
+
+## Step 4-A: 設定固定出口 IP (選用)
+
+> **此步驟為選用**：僅當你的服務需要固定出口 IP (例如呼叫需要 IP 白名單的外部 API) 時才需執行。
+
+### 架構說明
+
+使用 Direct VPC Egress + Cloud NAT 實現固定出口 IP：
+
+| 元件 | 用途 |
+|------|------|
+| VPC Network | 虛擬私有網路 |
+| Subnet | 子網路，Cloud Run 從此分配 IP |
+| Cloud Router | 路由控制器 |
+| Cloud NAT | 網路位址轉換，綁定靜態 IP |
+| Static IP | 固定的外部 IP 位址 |
+
+### Subnet 大小建議
+
+| Subnet | 可用 IP | 支援 Max Instances | 建議場景 |
+|--------|---------|-------------------|----------|
+| `/26` | 60 | ~25 | 開發測試 |
+| `/24` | 252 | ~120 | **推薦生產環境** |
+| `/23` | 508 | ~250 | 大型服務 |
+
+> **IP 消耗公式**：Cloud Run 使用 `2 × 實例數` 的 IP，版本更新時需要雙倍 (舊版 + 新版同時存在)
+
+### 4-A.1 建立 VPC 網路
+
+```bash
+# 建立 VPC 網路 (custom mode)
+gcloud compute networks create $VPC_NETWORK \
+  --subnet-mode=custom \
+  --project=$PROJECT_ID
+
+echo "✅ VPC 網路已建立: $VPC_NETWORK"
+```
+
+### 4-A.2 建立子網路
+
+```bash
+# 建立子網路 (使用 RFC 6598 範圍，避免與常見私有 IP 衝突)
+gcloud compute networks subnets create $SUBNET_NAME \
+  --network=$VPC_NETWORK \
+  --range=$SUBNET_RANGE \
+  --region=$REGION \
+  --project=$PROJECT_ID
+
+echo "✅ 子網路已建立: $SUBNET_NAME ($SUBNET_RANGE)"
+```
+
+### 4-A.3 保留靜態 IP
+
+```bash
+# 保留靜態外部 IP
+gcloud compute addresses create $STATIC_IP_NAME \
+  --region=$REGION \
+  --project=$PROJECT_ID
+
+# 查看保留的 IP 位址
+STATIC_IP=$(gcloud compute addresses describe $STATIC_IP_NAME \
+  --region=$REGION \
+  --format='value(address)' \
+  --project=$PROJECT_ID)
+
+echo "✅ 靜態 IP 已保留: $STATIC_IP"
+```
+
+### 4-A.4 建立 Cloud Router
+
+```bash
+gcloud compute routers create $ROUTER_NAME \
+  --network=$VPC_NETWORK \
+  --region=$REGION \
+  --project=$PROJECT_ID
+
+echo "✅ Cloud Router 已建立: $ROUTER_NAME"
+```
+
+### 4-A.5 建立 Cloud NAT
+
+```bash
+gcloud compute routers nats create $NAT_NAME \
+  --router=$ROUTER_NAME \
+  --region=$REGION \
+  --nat-custom-subnet-ip-ranges=$SUBNET_NAME \
+  --nat-external-ip-pool=$STATIC_IP_NAME \
+  --project=$PROJECT_ID
+
+echo "✅ Cloud NAT 已建立: $NAT_NAME (使用靜態 IP: $STATIC_IP)"
+```
+
+### 4-A.6 驗證設定
+
+```bash
+echo "=== VPC 網路 ==="
+gcloud compute networks describe $VPC_NETWORK --project=$PROJECT_ID --format="table(name,selfLink)"
+
+echo ""
+echo "=== 子網路 ==="
+gcloud compute networks subnets describe $SUBNET_NAME --region=$REGION --project=$PROJECT_ID --format="table(name,ipCidrRange,region)"
+
+echo ""
+echo "=== 靜態 IP ==="
+gcloud compute addresses describe $STATIC_IP_NAME --region=$REGION --project=$PROJECT_ID --format="table(name,address,status)"
+
+echo ""
+echo "=== Cloud NAT ==="
+gcloud compute routers nats describe $NAT_NAME --router=$ROUTER_NAME --region=$REGION --project=$PROJECT_ID
 ```
 
 ---
@@ -477,6 +687,8 @@ gcloud secrets versions list $CONFIG_SECRET_NAME --project=$PROJECT_ID
 | `run.googleapis.com/execution-environment: gen2` | 使用第二代執行環境 |
 | `run.googleapis.com/startup-cpu-boost` | 啟動時提供額外 CPU |
 | `autoscaling.knative.dev/maxScale` | 最大實例數 |
+| `run.googleapis.com/network-interfaces` | (選用) Direct VPC Egress 網路設定 |
+| `run.googleapis.com/vpc-access-egress` | (選用) VPC 出口流量設定：`all-traffic` 或 `private-ranges-only` |
 
 ### Health Probes 說明
 
@@ -512,6 +724,9 @@ spec:
         autoscaling.knative.dev/maxScale: "${MAX_INSTANCES}"
         run.googleapis.com/execution-environment: gen2
         run.googleapis.com/startup-cpu-boost: "true"
+        # (選用) 固定出口 IP - 如已完成 Step 4-A，取消下兩行註解
+        # run.googleapis.com/network-interfaces: '[{"network":"${VPC_NETWORK}","subnetwork":"${SUBNET_NAME}"}]'
+        # run.googleapis.com/vpc-access-egress: all-traffic
     spec:
       containerConcurrency: $CONTAINER_CONCURRENCY
       timeoutSeconds: 300
@@ -761,6 +976,9 @@ spec:
         autoscaling.knative.dev/maxScale: "${MAX_INSTANCES}"
         run.googleapis.com/execution-environment: gen2
         run.googleapis.com/startup-cpu-boost: "true"
+        # (選用) 固定出口 IP - 如已完成 Step 4-A，取消下兩行註解
+        # run.googleapis.com/network-interfaces: '[{"network":"${VPC_NETWORK}","subnetwork":"${SUBNET_NAME}"}]'
+        # run.googleapis.com/vpc-access-egress: all-traffic
     spec:
       containerConcurrency: $CONTAINER_CONCURRENCY
       timeoutSeconds: 300
@@ -854,6 +1072,8 @@ echo "✅ 部署完成: $(gcloud run services describe $SERVICE_NAME --region=$R
 
 ## 常用指令
 
+### Cloud Run 服務管理
+
 ```bash
 # 查看日誌
 gcloud run services logs read $SERVICE_NAME --region=$REGION --limit=50
@@ -862,11 +1082,47 @@ gcloud run services logs read $SERVICE_NAME --region=$REGION --limit=50
 gcloud run services describe $SERVICE_NAME --region=$REGION
 
 # 更新映像版本
-export APP_IMAGE="spike19820318/gate:0.0.7"
+export APP_IMAGE="spike19820318/gate:0.0.8"
 # 然後重新執行 Step 8 (Cloud Run YAML) 和 Step 9 (部署)
 
 # 刪除服務
 gcloud run services delete $SERVICE_NAME --region=$REGION --quiet
+```
+
+### VPC / NAT 管理 (如已設定固定出口 IP)
+
+```bash
+# 查看靜態 IP
+gcloud compute addresses describe $STATIC_IP_NAME \
+  --region=$REGION \
+  --format='table(name,address,status)' \
+  --project=$PROJECT_ID
+
+# 查看 NAT 設定
+gcloud compute routers nats describe $NAT_NAME \
+  --router=$ROUTER_NAME \
+  --region=$REGION \
+  --project=$PROJECT_ID
+
+# 查看 NAT 映射 (確認流量是否經過 NAT)
+gcloud compute routers get-nat-mapping-info $ROUTER_NAME \
+  --region=$REGION \
+  --project=$PROJECT_ID
+
+# 更新 Cloud Run 服務啟用 VPC Egress (CLI 方式)
+gcloud run services update $SERVICE_NAME \
+  --network=$VPC_NETWORK \
+  --subnet=$SUBNET_NAME \
+  --vpc-egress=all-traffic \
+  --region=$REGION \
+  --project=$PROJECT_ID
+
+# 刪除 VPC 相關資源 (按順序)
+gcloud compute routers nats delete $NAT_NAME --router=$ROUTER_NAME --region=$REGION --quiet
+gcloud compute routers delete $ROUTER_NAME --region=$REGION --quiet
+gcloud compute addresses delete $STATIC_IP_NAME --region=$REGION --quiet
+gcloud compute networks subnets delete $SUBNET_NAME --region=$REGION --quiet
+gcloud compute networks delete $VPC_NETWORK --quiet
 ```
 
 ---
@@ -898,3 +1154,10 @@ echo "Cloud Logging:    https://console.cloud.google.com/logs?project=$PROJECT_I
 - [OTel Collector Releases](https://github.com/GoogleCloudPlatform/opentelemetry-operations-collector/releases)
 - [Google Cloud Exporter (default_log_name)](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/exporter/googlecloudexporter/README.md)
 - [OTel Security Best Practices](https://opentelemetry.io/docs/security/config-best-practices/)
+
+### VPC 與網路 (固定出口 IP)
+- [Static Outbound IP Address](https://docs.cloud.google.com/run/docs/configuring/static-outbound-ip) - 設定固定出口 IP
+- [Direct VPC Egress](https://docs.cloud.google.com/run/docs/configuring/vpc-direct-vpc) - Direct VPC Egress 設定
+- [Compare VPC Egress Options](https://docs.cloud.google.com/run/docs/configuring/connecting-vpc) - VPC 連線方式比較
+- [Cloud Run Networking Best Practices](https://docs.cloud.google.com/run/docs/configuring/networking-best-practices) - 網路最佳實踐
+- [Subnets](https://docs.cloud.google.com/vpc/docs/subnets) - Subnet 規劃指南
