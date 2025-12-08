@@ -133,7 +133,7 @@ export CONFIG_SECRET_NAME="gate-config"
 # ==================================================
 # 應用程式容器設定
 # ==================================================
-export APP_IMAGE="spike19820318/gate:0.0.9"
+export APP_IMAGE="spike19820318/gate:0.0.10"
 export APP_PORT="8080"
 export APP_CPU="1000m"
 export APP_MEMORY="1Gi"
