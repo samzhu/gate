@@ -66,6 +66,25 @@ LLM Gateway 使用 Spring Boot 4.0 + OpenTelemetry 實現完整的可觀測性�
 - Collector 自動導出到 Cloud Trace / Cloud Monitoring / Cloud Logging
 - 統一的 OpenTelemetry 架構，本地與生產環境一致
 
+### GCP Cloud Trace 初始化
+
+首次使用 Cloud Trace 時，需要手動初始化 Trace Storage：
+
+**步驟**：
+
+1. 啟用 Cloud Trace API：
+   ```bash
+   gcloud services enable cloudtrace.googleapis.com
+   ```
+
+2. 前往 [Cloud Trace Explorer](https://console.cloud.google.com/traces/list) 頁面
+
+3. 點擊頁面頂部的 **「Enable」** 按鈕初始化 Trace Storage
+
+4. 等待幾分鐘完成初始化
+
+> **注意**：只執行 `gcloud services enable` 不夠，必須在 Console UI 點擊 Enable 才會開始收集 traces。
+
 ---
 
 ## 配置

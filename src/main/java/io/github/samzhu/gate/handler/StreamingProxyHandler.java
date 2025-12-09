@@ -225,11 +225,16 @@ public class StreamingProxyHandler {
         UsageEventData eventData = tokenExtractor.buildUsageEventData(status, keyAlias, traceId, anthropicRequestId);
         usageEventPublisher.publish(eventData, subject);
 
-        log.debug("Stream completed: subject={}, keyAlias={}, traceId={}, anthropicRequestId={}, " +
-            "inputTokens={}, outputTokens={}, latencyMs={}",
-            subject, keyAlias, traceId, anthropicRequestId,
+        // 記錄 Token 用量 - 用於監控和計費追蹤
+        log.info("Token usage: subject={}, inputTokens={}, outputTokens={}, model={}, latencyMs={}",
+            subject,
             tokenExtractor.getInputTokens(),
-            tokenExtractor.getOutputTokens(), tokenExtractor.getLatencyMs());
+            tokenExtractor.getOutputTokens(),
+            tokenExtractor.getModel(),
+            tokenExtractor.getLatencyMs());
+
+        log.debug("Stream completed: keyAlias={}, traceId={}, anthropicRequestId={}, messageId={}",
+            keyAlias, traceId, anthropicRequestId, tokenExtractor.getMessageId());
     }
 
     /**

@@ -135,10 +135,16 @@ public class NonStreamingProxyHandler {
             // 發送用量事件
             usageEventPublisher.publish(eventData, subject);
 
-            log.debug("Non-streaming completed: subject={}, keyAlias={}, traceId={}, anthropicRequestId={}, " +
-                "inputTokens={}, outputTokens={}, latencyMs={}",
-                subject, keyAlias, traceId, anthropicRequestId,
-                eventData.inputTokens(), eventData.outputTokens(), eventData.latencyMs());
+            // 記錄 Token 用量 - 用於監控和計費追蹤
+            log.info("Token usage: subject={}, inputTokens={}, outputTokens={}, model={}, latencyMs={}",
+                subject,
+                eventData.inputTokens(),
+                eventData.outputTokens(),
+                eventData.model(),
+                eventData.latencyMs());
+
+            log.debug("Non-streaming completed: keyAlias={}, traceId={}, anthropicRequestId={}, messageId={}",
+                keyAlias, traceId, anthropicRequestId, eventData.messageId());
 
             return ServerResponse.status(HttpStatus.valueOf(statusCode))
                 .contentType(MediaType.APPLICATION_JSON)
