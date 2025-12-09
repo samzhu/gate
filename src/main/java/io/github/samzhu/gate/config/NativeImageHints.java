@@ -3,6 +3,7 @@ package io.github.samzhu.gate.config;
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
 import org.springframework.context.annotation.Configuration;
 
+import io.github.samzhu.gate.model.StreamEvent;
 import io.github.samzhu.gate.model.UsageEventData;
 
 /**
@@ -15,8 +16,15 @@ import io.github.samzhu.gate.model.UsageEventData;
  */
 @Configuration
 @RegisterReflectionForBinding({
+    // CloudEvents payload
     UsageEventData.class,
-    UsageEventData.Builder.class
+    UsageEventData.Builder.class,
+    // SSE Stream parsing
+    StreamEvent.class,
+    StreamEvent.Message.class,
+    StreamEvent.Delta.class,
+    StreamEvent.Usage.class,
+    StreamEvent.ContentBlock.class
 })
 public class NativeImageHints {
     // 此類別僅用於註冊反射提示，不需要任何方法

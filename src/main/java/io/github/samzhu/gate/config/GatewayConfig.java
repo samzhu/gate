@@ -1,9 +1,13 @@
 package io.github.samzhu.gate.config;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.servlet.function.RouterFunction;
@@ -52,6 +56,7 @@ import io.github.samzhu.gate.service.ApiKeySelection;
 public class GatewayConfig {
 
     private static final Logger log = LoggerFactory.getLogger(GatewayConfig.class);
+    private static final String ANTHROPIC_HEADER_PREFIX = "anthropic-";
 
     private final ApiKeyRotationService apiKeyRotationService;
     private final StreamingProxyHandler streamingProxyHandler;
@@ -102,20 +107,23 @@ public class GatewayConfig {
             String keyAlias = selection.alias();
             String apiKey = selection.key();
 
+            // 提取所有 anthropic-* headers（用於 Beta 功能、版本控制等）
+            Map<String, String> anthropicHeaders = extractAnthropicHeaders(request);
+
             // 判斷是否為串流請求
             boolean isStreaming = isStreamingRequest(requestBody);
 
-            log.debug("Routing request: subject={}, keyAlias={}, streaming={}",
-                subject, keyAlias, isStreaming);
+            log.debug("Routing request: subject={}, keyAlias={}, streaming={}, anthropicHeaders={}",
+                subject, keyAlias, isStreaming, anthropicHeaders.keySet());
 
             if (isStreaming) {
                 // 串流請求 - 使用 ServerResponse.sse()
                 return streamingProxyHandler.handleStreaming(
-                    requestBody, apiKey, subject, keyAlias);
+                    requestBody, apiKey, subject, keyAlias, anthropicHeaders);
             } else {
                 // 非串流請求 - 返回 JSON 回應
                 return nonStreamingProxyHandler.handleNonStreaming(
-                    requestBody, apiKey, subject, keyAlias);
+                    requestBody, apiKey, subject, keyAlias, anthropicHeaders);
             }
         } catch (Exception e) {
             log.error("Error handling messages request: {}", e.getMessage(), e);
@@ -143,13 +151,18 @@ public class GatewayConfig {
                     .body("{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"No Anthropic API key configured\"}}");
             }
 
-            log.debug("Routing count_tokens request: keyAlias={}", selection.alias());
+            // 提取所有 anthropic-* headers
+            Map<String, String> anthropicHeaders = extractAnthropicHeaders(request);
+
+            log.debug("Routing count_tokens request: keyAlias={}, anthropicHeaders={}",
+                selection.alias(), anthropicHeaders.keySet());
 
             return simpleProxyHandler.proxyRequest(
                 "/v1/messages/count_tokens",
                 requestBody,
                 selection.key(),
-                selection.alias()
+                selection.alias(),
+                anthropicHeaders
             );
         } catch (Exception e) {
             log.error("Error handling count_tokens request: {}", e.getMessage(), e);
@@ -192,5 +205,33 @@ public class GatewayConfig {
             log.warn("Failed to parse request body for stream detection: {}", e.getMessage());
         }
         return false;
+    }
+
+    /**
+     * 從請求中提取所有 anthropic-* headers
+     *
+     * <p>透明轉發所有 Anthropic 相關 headers，支援：
+     * <ul>
+     *   <li>{@code anthropic-version} - API 版本</li>
+     *   <li>{@code anthropic-beta} - Beta 功能（如 context_management）</li>
+     *   <li>其他未來可能新增的 anthropic-* headers</li>
+     * </ul>
+     *
+     * @see <a href="https://platform.claude.com/docs/en/build-with-claude/context-editing">Context Editing</a>
+     */
+    private Map<String, String> extractAnthropicHeaders(ServerRequest request) {
+        Map<String, String> anthropicHeaders = new HashMap<>();
+        HttpHeaders headers = request.headers().asHttpHeaders();
+
+        for (String headerName : headers.keySet()) {
+            if (headerName.toLowerCase().startsWith(ANTHROPIC_HEADER_PREFIX)) {
+                String value = headers.getFirst(headerName);
+                if (value != null && !value.isBlank()) {
+                    anthropicHeaders.put(headerName.toLowerCase(), value);
+                }
+            }
+        }
+
+        return anthropicHeaders;
     }
 }

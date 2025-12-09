@@ -9,6 +9,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,14 +75,15 @@ public class StreamingProxyHandler {
     /**
      * 處理串流請求，返回 ServerResponse
      *
-     * @param requestBody 請求體
-     * @param apiKey      Anthropic API Key
-     * @param subject     用戶識別碼
-     * @param keyAlias    API Key 別名
+     * @param requestBody      請求體
+     * @param apiKey           Anthropic API Key
+     * @param subject          用戶識別碼
+     * @param keyAlias         API Key 別名
+     * @param anthropicHeaders 所有 anthropic-* headers（透明轉發）
      * @return ServerResponse with SSE
      */
     public ServerResponse handleStreaming(String requestBody, String apiKey, String subject,
-                                           String keyAlias) {
+                                           String keyAlias, Map<String, String> anthropicHeaders) {
         if (apiKey == null) {
             return ServerResponse.status(500)
                 .body("{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"No API key available\"}}");
@@ -90,12 +92,13 @@ public class StreamingProxyHandler {
         String traceId = getCurrentTraceId();
 
         return ServerResponse.sse(sseBuilder -> {
-            processStream(sseBuilder, requestBody, apiKey, subject, keyAlias, traceId);
+            processStream(sseBuilder, requestBody, apiKey, subject, keyAlias, traceId, anthropicHeaders);
         });
     }
 
     private void processStream(ServerResponse.SseBuilder sseBuilder, String requestBody, String apiKey,
-                               String subject, String keyAlias, String traceId) {
+                               String subject, String keyAlias, String traceId,
+                               Map<String, String> anthropicHeaders) {
         TokenExtractor tokenExtractor = new TokenExtractor();
         SseParser sseParser = new SseParser(objectMapper);
         String status = "success";
@@ -104,11 +107,22 @@ public class StreamingProxyHandler {
         try {
             URI uri = URI.create(anthropicProperties.baseUrl() + "/v1/messages");
 
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(uri)
                 .header("Content-Type", "application/json")
-                .header("x-api-key", apiKey)
-                .header("anthropic-version", "2023-06-01")
+                .header("x-api-key", apiKey);
+
+            // 設定預設 anthropic-version（如果客戶端沒有提供）
+            if (!anthropicHeaders.containsKey("anthropic-version")) {
+                requestBuilder.header("anthropic-version", "2023-06-01");
+            }
+
+            // 透明轉發所有 anthropic-* headers
+            for (Map.Entry<String, String> entry : anthropicHeaders.entrySet()) {
+                requestBuilder.header(entry.getKey(), entry.getValue());
+            }
+
+            HttpRequest request = requestBuilder
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 

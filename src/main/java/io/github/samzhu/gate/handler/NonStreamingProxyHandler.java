@@ -7,6 +7,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,14 +74,15 @@ public class NonStreamingProxyHandler {
     /**
      * 處理非串流請求
      *
-     * @param requestBody 請求體
-     * @param apiKey      Anthropic API Key
-     * @param subject     用戶識別碼
-     * @param keyAlias    API Key 別名
+     * @param requestBody      請求體
+     * @param apiKey           Anthropic API Key
+     * @param subject          用戶識別碼
+     * @param keyAlias         API Key 別名
+     * @param anthropicHeaders 所有 anthropic-* headers（透明轉發）
      * @return ServerResponse
      */
     public ServerResponse handleNonStreaming(String requestBody, String apiKey, String subject,
-                                              String keyAlias) {
+                                              String keyAlias, Map<String, String> anthropicHeaders) {
         long startTime = System.currentTimeMillis();
         String status = "success";
         String traceId = getCurrentTraceId();
@@ -88,11 +90,22 @@ public class NonStreamingProxyHandler {
         try {
             URI uri = URI.create(anthropicProperties.baseUrl() + "/v1/messages");
 
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(uri)
                 .header("Content-Type", "application/json")
-                .header("x-api-key", apiKey)
-                .header("anthropic-version", "2023-06-01")
+                .header("x-api-key", apiKey);
+
+            // 設定預設 anthropic-version（如果客戶端沒有提供）
+            if (!anthropicHeaders.containsKey("anthropic-version")) {
+                requestBuilder.header("anthropic-version", "2023-06-01");
+            }
+
+            // 透明轉發所有 anthropic-* headers
+            for (Map.Entry<String, String> entry : anthropicHeaders.entrySet()) {
+                requestBuilder.header(entry.getKey(), entry.getValue());
+            }
+
+            HttpRequest request = requestBuilder
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 
