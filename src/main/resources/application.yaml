@@ -12,6 +12,15 @@
 spring:
   application:
     name: gate
+  # 啟用 Virtual Threads (Java 21+)
+  # 對 I/O 密集型 API Gateway 有顯著效能提升
+  threads:
+    virtual:
+      enabled: true
+  # 啟用 @Observed 註解支援（預先配置，確保專案一致性）
+  observations:
+    annotations:
+      enabled: true
   security:
     oauth2:
       resourceserver:

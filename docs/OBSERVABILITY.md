@@ -101,6 +101,62 @@ Spring Boot 4.0 重新組織了 OpenTelemetry 配置屬性：
 | **Logging 啟用** | `management.otlp.logging.export.enabled` | `management.logging.export.otlp.enabled` |
 | **Metrics 端點** | `management.otlp.metrics.export.url` | `management.otlp.metrics.export.url` (未變) |
 
+### Virtual Threads
+
+專案啟用 Java 21 Virtual Threads，提升 I/O 密集型操作效能：
+
+```yaml
+# application.yaml
+spring:
+  threads:
+    virtual:
+      enabled: true
+```
+
+**效益**：
+- API Gateway 大量等待 Anthropic API 回應（I/O bound）
+- Virtual Threads 讓每個請求使用輕量級虛擬執行緒，而非 Platform Thread
+- 可處理更多併發請求，降低記憶體使用
+
+### ObservabilityConfig
+
+專案預先配置 `@Observed` 註解支援與非同步 Context 傳播：
+
+```yaml
+# application.yaml
+spring:
+  observations:
+    annotations:
+      enabled: true  # 啟用 @Observed 註解
+```
+
+```java
+// ObservabilityConfig.java
+@Bean
+public TaskDecorator contextPropagatingTaskDecorator() {
+    return new ContextPropagatingTaskDecorator();
+}
+```
+
+**功能說明**：
+
+| 配置 | 用途 | 使用場景 |
+|------|------|----------|
+| `spring.observations.annotations.enabled` | 啟用 `@Observed` 註解 | 方法級別自動 Span 追蹤 |
+| `ContextPropagatingTaskDecorator` | Context 傳播 | `@Async` 非同步任務追蹤 |
+
+**使用範例**：
+
+```java
+// 自動建立 Span 追蹤方法執行
+@Observed(name = "my.operation")
+public void myMethod() { ... }
+
+// @Async 方法自動繼承 TraceContext
+@Async
+public CompletableFuture<String> asyncMethod() { ... }
+```
+
 ### 依賴配置 (build.gradle)
 
 ```groovy
