@@ -47,7 +47,9 @@ dependencies {
 	implementation "com.google.cloud:spring-cloud-gcp-starter-secretmanager"
 	// 開發環境使用 RabbitMQ (只引入 binder 不含自動配置)
 	implementation 'org.springframework.cloud:spring-cloud-stream-binder-rabbit'
-	implementation "io.cloudevents:cloudevents-spring:4.0.1"
+	// CloudEvents Binary Mode：使用 spring-cloud-function-context 內建的 CloudEventMessageBuilder
+	// - CloudEvents 屬性在 message headers（ce-* 前綴），data 在 body
+	// - 不需要額外依賴，spring-cloud-stream 已經包含 spring-cloud-function-context
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	developmentOnly 'org.springframework.boot:spring-boot-docker-compose'

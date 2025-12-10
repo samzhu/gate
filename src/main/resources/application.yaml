@@ -42,11 +42,12 @@ spring:
           enabled: true
     # Spring Cloud Stream 配置
     # Topic 名稱固定為 llm-gateway-usage
+    # Binary Mode: CloudEvents 屬性在 message attributes，data 在 body
     stream:
       bindings:
         usageEvent-out-0:
           destination: llm-gateway-usage
-          content-type: application/cloudevents+json
+          content-type: application/json
 
 # Anthropic API 配置
 anthropic:
