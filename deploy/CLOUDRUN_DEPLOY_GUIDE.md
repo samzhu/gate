@@ -98,6 +98,7 @@ gcloud projects list
 | `OTEL_LOG_NAME` | Cloud Logging 日誌名稱 (用於篩選日誌) | `${SERVICE_NAME}` |
 | `MAX_INSTANCES` | 最大實例數 | `1` |
 | `CONTAINER_CONCURRENCY` | 容器並發請求數 | `80` |
+| `REQUEST_TIMEOUT` | 請求超時時間（秒） | `900` |
 | `OTEL_SECRET_NAME` | OTel Collector 配置密鑰名稱 | `otel-collector-config` |
 | `CONFIG_SECRET_NAME` | 應用程式配置密鑰名稱 | `gate-config` |
 | `SERVICE_ACCOUNT_ID` | 服務帳戶 ID | `gate-sa` |
@@ -157,6 +158,10 @@ export OTEL_LOG_NAME="${SERVICE_NAME}"
 # ==================================================
 export MAX_INSTANCES="1"
 export CONTAINER_CONCURRENCY="80"
+# 請求超時: LLM 應用需要較長時間，建議 900 秒 (15 分鐘)
+# - 預設值 300 秒對於長回應可能不足
+# - 最大值 3600 秒 (需第二代執行環境)
+export REQUEST_TIMEOUT="900"
 
 # ==================================================
 # 服務帳戶設定
@@ -690,6 +695,14 @@ gcloud secrets versions list $CONFIG_SECRET_NAME --project=$PROJECT_ID
 | `run.googleapis.com/network-interfaces` | (選用) Direct VPC Egress 網路設定 |
 | `run.googleapis.com/vpc-access-egress` | (選用) VPC 出口流量設定：`all-traffic` 或 `private-ranges-only` |
 
+**Spec 層級** (`spec.template.spec`):
+
+| 欄位 | 說明 |
+|------|------|
+| `containerConcurrency` | 每個容器實例的最大並發請求數 |
+| `timeoutSeconds` | 請求超時時間（秒）。LLM 應用建議設為 900 秒（15 分鐘），最大值 3600 秒 |
+| `serviceAccountName` | 服務帳戶名稱 |
+
 ### Health Probes 說明
 
 **App 容器** (Spring Boot Actuator):
@@ -729,7 +742,7 @@ spec:
         # run.googleapis.com/vpc-access-egress: all-traffic
     spec:
       containerConcurrency: $CONTAINER_CONCURRENCY
-      timeoutSeconds: 300
+      timeoutSeconds: $REQUEST_TIMEOUT
       serviceAccountName: $SERVICE_ACCOUNT
       containers:
         - name: app
@@ -981,7 +994,7 @@ spec:
         # run.googleapis.com/vpc-access-egress: all-traffic
     spec:
       containerConcurrency: $CONTAINER_CONCURRENCY
-      timeoutSeconds: 300
+      timeoutSeconds: $REQUEST_TIMEOUT
       serviceAccountName: $SERVICE_ACCOUNT
       containers:
         - name: app

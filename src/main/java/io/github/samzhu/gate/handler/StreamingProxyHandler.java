@@ -14,6 +14,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.function.ServerResponse;
 
 import io.micrometer.tracing.Tracer;
@@ -195,12 +196,25 @@ public class StreamingProxyHandler {
 
                 sseBuilder.complete();
             }
+        } catch (AsyncRequestNotUsableException e) {
+            // 客戶端提前斷開連接（如用戶取消、網路中斷、客戶端超時）
+            // 這是 LLM 長回應場景下的常見情況，記錄為 WARN 而非 ERROR
+            log.warn("Client disconnected during streaming: {} (this is common for long LLM responses)",
+                e.getMessage());
+            status = "client_disconnected";
+            // 不調用 sseBuilder.error()，因為連接已經關閉
         } catch (IOException e) {
-            log.error("IO error during streaming: {}", e.getMessage(), e);
-            status = "error";
-            try {
-                sseBuilder.error(e);
-            } catch (Exception ignored) {}
+            // 檢查是否為客戶端斷開導致的 Broken pipe
+            if (isClientDisconnectedException(e)) {
+                log.warn("Client disconnected (Broken pipe) during streaming: {}", e.getMessage());
+                status = "client_disconnected";
+            } else {
+                log.error("IO error during streaming: {}", e.getMessage(), e);
+                status = "error";
+                try {
+                    sseBuilder.error(e);
+                } catch (Exception ignored) {}
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Streaming interrupted: {}", e.getMessage());
@@ -209,11 +223,17 @@ public class StreamingProxyHandler {
                 sseBuilder.error(e);
             } catch (Exception ignored) {}
         } catch (Exception e) {
-            log.error("Unexpected error during streaming: {}", e.getMessage(), e);
-            status = "error";
-            try {
-                sseBuilder.error(e);
-            } catch (Exception ignored) {}
+            // 檢查根本原因是否為客戶端斷開
+            if (isClientDisconnectedException(e)) {
+                log.warn("Client disconnected during streaming: {}", e.getMessage());
+                status = "client_disconnected";
+            } else {
+                log.error("Unexpected error during streaming: {}", e.getMessage(), e);
+                status = "error";
+                try {
+                    sseBuilder.error(e);
+                } catch (Exception ignored) {}
+            }
         } finally {
             publishUsageEvent(tokenExtractor, status, keyAlias, traceId, anthropicRequestId, subject);
         }
@@ -250,5 +270,49 @@ public class StreamingProxyHandler {
             log.debug("Failed to get trace ID: {}", e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * 檢查異常是否為客戶端斷開連接導致
+     * <p>常見情況：
+     * <ul>
+     *   <li>Broken pipe - 客戶端關閉連接後伺服器嘗試寫入</li>
+     *   <li>Connection reset - 客戶端強制重置連接</li>
+     *   <li>ClientAbortException - Tomcat 檢測到客戶端中斷</li>
+     * </ul>
+     *
+     * @param e 要檢查的異常
+     * @return 如果是客戶端斷開導致的異常則返回 true
+     */
+    private boolean isClientDisconnectedException(Throwable e) {
+        if (e == null) {
+            return false;
+        }
+
+        // 檢查異常類型
+        String className = e.getClass().getName();
+        if (className.contains("ClientAbortException") ||
+            className.contains("AsyncRequestNotUsableException")) {
+            return true;
+        }
+
+        // 檢查異常訊息
+        String message = e.getMessage();
+        if (message != null) {
+            String lowerMessage = message.toLowerCase();
+            if (lowerMessage.contains("broken pipe") ||
+                lowerMessage.contains("connection reset") ||
+                lowerMessage.contains("client disconnected")) {
+                return true;
+            }
+        }
+
+        // 遞迴檢查根本原因
+        Throwable cause = e.getCause();
+        if (cause != null && cause != e) {
+            return isClientDisconnectedException(cause);
+        }
+
+        return false;
     }
 }
