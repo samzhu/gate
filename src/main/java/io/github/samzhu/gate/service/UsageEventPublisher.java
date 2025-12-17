@@ -72,16 +72,26 @@ public class UsageEventPublisher {
      *   ce-datacontenttype: application/json
      *
      * Body:
-     *   { "trace_id": "...", "model": "...", ... }
+     *   { "user_id": "...", "event_time": "...", "trace_id": "...", "model": "...", ... }
      * }</pre>
      *
-     * @param eventData 用量事件資料
-     * @param subject   用戶識別碼 (JWT sub claim)
+     * <p>注意：{@code user_id} 和 {@code event_time} 同時存在於 CloudEvents headers
+     * （{@code ce-subject}, {@code ce-time}）和 data payload 中，這是有意義的冗餘：
+     * <ul>
+     *   <li>CloudEvents headers：用於 message broker 層級的 subscription filtering</li>
+     *   <li>Data payload：讓消費端可直接反序列化使用，不需從 headers 組裝資料</li>
+     * </ul>
+     *
+     * @param eventData 用量事件資料（包含 userId 和 eventTime）
      */
-    public void publish(UsageEventData eventData, String subject) {
+    public void publish(UsageEventData eventData) {
         try {
             // 使用 traceId 作為 CloudEvent ID，若無則產生 UUID
             String eventId = eventData.traceId() != null ? eventData.traceId() : UUID.randomUUID().toString();
+            String subject = eventData.userId();
+            OffsetDateTime eventTime = eventData.eventTime() != null
+                ? OffsetDateTime.ofInstant(eventData.eventTime(), java.time.ZoneOffset.UTC)
+                : OffsetDateTime.now();
 
             // 使用 CloudEventMessageBuilder 建立 Binary Mode 訊息
             // Spring Cloud Stream 會自動序列化 POJO 為 JSON
@@ -90,7 +100,7 @@ public class UsageEventPublisher {
                 .setId(eventId)
                 .setType(EVENT_TYPE)
                 .setSource(EVENT_SOURCE)
-                .setTime(OffsetDateTime.now())
+                .setTime(eventTime)
                 .setSubject(subject)
                 .setDataContentType("application/json")
                 .build();

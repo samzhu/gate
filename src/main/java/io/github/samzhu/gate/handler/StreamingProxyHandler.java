@@ -242,8 +242,8 @@ public class StreamingProxyHandler {
     private void publishUsageEvent(TokenExtractor tokenExtractor, String status,
                                     String keyAlias, String traceId,
                                     String anthropicRequestId, String subject) {
-        UsageEventData eventData = tokenExtractor.buildUsageEventData(status, keyAlias, traceId, anthropicRequestId);
-        usageEventPublisher.publish(eventData, subject);
+        UsageEventData eventData = tokenExtractor.buildUsageEventData(status, keyAlias, traceId, anthropicRequestId, subject);
+        usageEventPublisher.publish(eventData);
 
         // 記錄 Token 用量 - 用於監控和計費追蹤
         log.info("Token usage: subject={}, inputTokens={}, outputTokens={}, model={}, latencyMs={}",

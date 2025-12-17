@@ -1,5 +1,7 @@
 package io.github.samzhu.gate.model;
 
+import java.time.Instant;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
@@ -7,6 +9,22 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * <p>記錄每次 Claude API 呼叫的 Token 用量和請求資訊，作為 CloudEvents 的 data 欄位發送到訊息佇列。
  * <b>Gate 只發布 Anthropic API 回傳的原始數據，不進行任何計算。計算與結算邏輯應由 Ledger 端處理。</b>
+ *
+ * <h3>資料來源</h3>
+ * <p>所有 Token 相關欄位均直接來自 Anthropic API 回應，Gate 不做任何計算：
+ * <ul>
+ *   <li><b>串流模式</b>（{@code stream: true}）：
+ *       <ul>
+ *         <li>{@code message_start} SSE 事件 → {@code input_tokens}, {@code cache_creation_tokens}, {@code cache_read_tokens}</li>
+ *         <li>{@code message_delta} SSE 事件 → {@code output_tokens}</li>
+ *       </ul>
+ *   </li>
+ *   <li><b>非串流模式</b>（{@code stream: false}）：
+ *       <ul>
+ *         <li>JSON 回應的 {@code usage} 物件 → 所有 token 欄位</li>
+ *       </ul>
+ *   </li>
+ * </ul>
  *
  * <h3>Token 欄位定義（依據 Anthropic API 官方文檔）</h3>
  * <p>根據 <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching#tracking-cache-performance">
@@ -33,6 +51,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * <p>欄位說明：
  * <ul>
+ *   <li><b>用戶與時間</b>
+ *       <ul>
+ *         <li>{@code userId} - 用戶識別碼（來自 JWT sub claim）</li>
+ *         <li>{@code eventTime} - 事件產生時間（請求處理完成時，UTC）</li>
+ *       </ul>
+ *   </li>
  *   <li><b>核心用量（原始數據）</b>
  *       <ul>
  *         <li>{@code model} - 使用的模型名稱（如 claude-sonnet-4-5-20250929）</li>
@@ -70,6 +94,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @see <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Prompt Caching</a>
  */
 public record UsageEventData(
+    // === 用戶與時間 ===
+    @JsonProperty("user_id")
+    String userId,
+
+    @JsonProperty("event_time")
+    Instant eventTime,
+
     // === 核心用量 ===
     String model,
 
@@ -118,6 +149,8 @@ public record UsageEventData(
     }
 
     public static class Builder {
+        private String userId;
+        private Instant eventTime;
         private String model;
         private int inputTokens;
         private int outputTokens;
@@ -132,6 +165,16 @@ public record UsageEventData(
         private String keyAlias;
         private String traceId;
         private String anthropicRequestId;
+
+        public Builder userId(String userId) {
+            this.userId = userId;
+            return this;
+        }
+
+        public Builder eventTime(Instant eventTime) {
+            this.eventTime = eventTime;
+            return this;
+        }
 
         public Builder model(String model) {
             this.model = model;
@@ -205,6 +248,7 @@ public record UsageEventData(
 
         public UsageEventData build() {
             return new UsageEventData(
+                userId, eventTime,
                 model, inputTokens, outputTokens,
                 cacheCreationTokens, cacheReadTokens,
                 messageId, latencyMs, stream, stopReason,

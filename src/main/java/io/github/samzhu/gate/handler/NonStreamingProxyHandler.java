@@ -7,6 +7,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -130,10 +131,10 @@ public class NonStreamingProxyHandler {
 
             // 解析回應並提取用量資訊
             UsageEventData eventData = parseUsageFromResponse(
-                responseBody, startTime, status, keyAlias, traceId, anthropicRequestId);
+                responseBody, startTime, status, keyAlias, traceId, anthropicRequestId, subject);
 
             // 發送用量事件
-            usageEventPublisher.publish(eventData, subject);
+            usageEventPublisher.publish(eventData);
 
             // 記錄 Token 用量 - 用於監控和計費追蹤
             log.info("Token usage: subject={}, inputTokens={}, outputTokens={}, model={}, latencyMs={}",
@@ -168,8 +169,10 @@ public class NonStreamingProxyHandler {
      */
     private UsageEventData parseUsageFromResponse(String responseBody, long startTime,
                                                    String status, String keyAlias, String traceId,
-                                                   String anthropicRequestId) {
+                                                   String anthropicRequestId, String userId) {
         UsageEventData.Builder builder = UsageEventData.builder()
+            .userId(userId)
+            .eventTime(Instant.now())
             .latencyMs(System.currentTimeMillis() - startTime)
             .stream(false)
             .status(status)
@@ -236,6 +239,8 @@ public class NonStreamingProxyHandler {
                                                String subject) {
         // 發送錯誤用量事件
         UsageEventData eventData = UsageEventData.builder()
+            .userId(subject)
+            .eventTime(Instant.now())
             .latencyMs(System.currentTimeMillis() - startTime)
             .stream(false)
             .status("error")
@@ -244,7 +249,7 @@ public class NonStreamingProxyHandler {
             .traceId(traceId)
             .build();
 
-        usageEventPublisher.publish(eventData, subject);
+        usageEventPublisher.publish(eventData);
 
         String errorBody = String.format(
             "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"%s\"}}",

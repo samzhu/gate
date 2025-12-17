@@ -1,5 +1,6 @@
 package io.github.samzhu.gate.util;
 
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -88,15 +89,18 @@ public class TokenExtractor {
     /**
      * 建立用量事件資料
      *
-     * @param status 請求狀態 (success/error)
+     * @param status 請求狀態 (success/error/client_disconnected)
      * @param keyAlias API Key 別名
      * @param traceId OpenTelemetry Trace ID
      * @param anthropicRequestId Anthropic 回應的 request-id header
+     * @param userId 用戶識別碼（來自 JWT sub claim）
      * @return 用量事件資料
      */
     public UsageEventData buildUsageEventData(String status, String keyAlias, String traceId,
-                                               String anthropicRequestId) {
+                                               String anthropicRequestId, String userId) {
         return UsageEventData.builder()
+            .userId(userId)
+            .eventTime(Instant.now())
             .model(model.get())
             .inputTokens(inputTokens.get())
             .outputTokens(outputTokens.get())
@@ -120,7 +124,7 @@ public class TokenExtractor {
      * @return 用量事件資料
      */
     public UsageEventData buildUsageEventData(String status) {
-        return buildUsageEventData(status, null, null, null);
+        return buildUsageEventData(status, null, null, null, null);
     }
 
     public int getInputTokens() {
