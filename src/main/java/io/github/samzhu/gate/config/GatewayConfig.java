@@ -27,10 +27,10 @@ import io.github.samzhu.gate.service.ApiKeySelection;
 /**
  * Spring Cloud Gateway Server MVC 路由配置
  *
- * <p>定義 Claude API 代理路由：
+ * <p>定義 Claude API 代理路由（按註冊順序，更具體的路徑優先）：
  * <ul>
- *   <li>{@code POST /v1/messages} - 訊息 API（支援串流/非串流）</li>
  *   <li>{@code POST /v1/messages/count_tokens} - Token 計算 API</li>
+ *   <li>{@code POST /v1/messages} - 訊息 API（支援串流/非串流）</li>
  * </ul>
  *
  * <p>{@code /v1/messages} 處理流程：
@@ -79,9 +79,11 @@ public class GatewayConfig {
 
     @Bean
     public RouterFunction<ServerResponse> messagesRoute() {
+        // 注意：更具體的路徑必須先註冊，確保 /v1/messages/count_tokens
+        // 在 /v1/messages 之前被匹配
         return RouterFunctions.route()
-            .POST("/v1/messages", this::handleMessages)
             .POST("/v1/messages/count_tokens", this::handleCountTokens)
+            .POST("/v1/messages", this::handleMessages)
             .build();
     }
 
