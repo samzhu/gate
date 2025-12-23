@@ -1,20 +1,15 @@
 package io.github.samzhu.gate.handler;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.servlet.function.ServerResponse;
 
 import io.micrometer.tracing.Tracer;
@@ -52,23 +47,36 @@ public class NonStreamingProxyHandler {
 
     private static final Logger log = LoggerFactory.getLogger(NonStreamingProxyHandler.class);
 
-    private final AnthropicProperties anthropicProperties;
     private final UsageEventPublisher usageEventPublisher;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private final RestClient restClient;
     private final Tracer tracer;
 
+    /**
+     * 建構子
+     *
+     * <p>重要：使用 Spring 自動配置的 {@code RestClient.Builder} 來建立 {@code RestClient}，
+     * 這樣才能自動啟用 Tracing 功能（Trace Context 傳播、子 Span 建立）。
+     *
+     * @param anthropicProperties Anthropic API 配置
+     * @param usageEventPublisher 用量事件發布器
+     * @param objectMapper JSON 物件映射器
+     * @param restClientBuilder Spring 自動配置的 RestClient.Builder（已包含 Tracing instrumentation）
+     * @param tracer Micrometer Tracer
+     * @see <a href="https://docs.spring.io/spring-boot/reference/actuator/tracing.html">Spring Boot Tracing</a>
+     */
     public NonStreamingProxyHandler(
             AnthropicProperties anthropicProperties,
             UsageEventPublisher usageEventPublisher,
             ObjectMapper objectMapper,
+            RestClient.Builder restClientBuilder,
             Tracer tracer) {
-        this.anthropicProperties = anthropicProperties;
         this.usageEventPublisher = usageEventPublisher;
         this.objectMapper = objectMapper;
         this.tracer = tracer;
-        this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
+        // 使用 Spring 自動配置的 Builder，確保 Tracing 自動傳播
+        this.restClient = restClientBuilder
+            .baseUrl(anthropicProperties.baseUrl())
             .build();
     }
 
@@ -85,79 +93,65 @@ public class NonStreamingProxyHandler {
     public ServerResponse handleNonStreaming(String requestBody, String apiKey, String subject,
                                               String keyAlias, Map<String, String> anthropicHeaders) {
         long startTime = System.currentTimeMillis();
-        String status = "success";
         String traceId = getCurrentTraceId();
 
         try {
-            URI uri = URI.create(anthropicProperties.baseUrl() + "/v1/messages");
-
-            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                .uri(uri)
-                .header("Content-Type", "application/json")
+            // 建立 RestClient 請求
+            RestClient.RequestBodySpec requestSpec = restClient.post()
+                .uri("/v1/messages")
+                .contentType(MediaType.APPLICATION_JSON)
                 .header("x-api-key", apiKey);
 
             // 設定預設 anthropic-version（如果客戶端沒有提供）
             if (!anthropicHeaders.containsKey("anthropic-version")) {
-                requestBuilder.header("anthropic-version", "2023-06-01");
+                requestSpec.header("anthropic-version", "2023-06-01");
             }
 
             // 透明轉發所有 anthropic-* headers
             for (Map.Entry<String, String> entry : anthropicHeaders.entrySet()) {
-                requestBuilder.header(entry.getKey(), entry.getValue());
+                requestSpec.header(entry.getKey(), entry.getValue());
             }
 
-            HttpRequest request = requestBuilder
-                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                .build();
+            // 使用 exchange() 方法來取得完整的回應資訊
+            // exchange() 會自動傳播 Trace Context 並建立子 Span
+            return requestSpec.body(requestBody)
+                .exchange((request, response) -> {
+                    String responseBody = new String(response.getBody().readAllBytes());
+                    HttpStatusCode statusCode = response.getStatusCode();
 
-            HttpResponse<String> response = httpClient.send(
-                request,
-                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
-            );
+                    // 從回應 header 提取 Anthropic request-id
+                    String anthropicRequestId = response.getHeaders().getFirst("request-id");
 
-            String responseBody = response.body();
-            int statusCode = response.statusCode();
+                    String status = "success";
+                    if (!statusCode.is2xxSuccessful()) {
+                        log.error("Upstream error: status={}, body={}, anthropicRequestId={}",
+                            statusCode.value(), responseBody, anthropicRequestId);
+                        status = "error";
+                    }
 
-            // 從回應 header 提取 Anthropic request-id
-            String anthropicRequestId = response.headers()
-                .firstValue("request-id")
-                .orElse(null);
+                    // 解析回應並提取用量資訊
+                    UsageEventData eventData = parseUsageFromResponse(
+                        responseBody, startTime, status, keyAlias, traceId, anthropicRequestId, subject);
 
-            if (statusCode != 200) {
-                log.error("Upstream error: status={}, body={}, anthropicRequestId={}",
-                    statusCode, responseBody, anthropicRequestId);
-                status = "error";
-            }
+                    // 發送用量事件
+                    usageEventPublisher.publish(eventData);
 
-            // 解析回應並提取用量資訊
-            UsageEventData eventData = parseUsageFromResponse(
-                responseBody, startTime, status, keyAlias, traceId, anthropicRequestId, subject);
+                    // 記錄 Token 用量 - 用於監控和計費追蹤
+                    log.info("Token usage: subject={}, inputTokens={}, outputTokens={}, model={}, latencyMs={}",
+                        subject,
+                        eventData.inputTokens(),
+                        eventData.outputTokens(),
+                        eventData.model(),
+                        eventData.latencyMs());
 
-            // 發送用量事件
-            usageEventPublisher.publish(eventData);
+                    log.debug("Non-streaming completed: keyAlias={}, traceId={}, anthropicRequestId={}, messageId={}",
+                        keyAlias, traceId, anthropicRequestId, eventData.messageId());
 
-            // 記錄 Token 用量 - 用於監控和計費追蹤
-            log.info("Token usage: subject={}, inputTokens={}, outputTokens={}, model={}, latencyMs={}",
-                subject,
-                eventData.inputTokens(),
-                eventData.outputTokens(),
-                eventData.model(),
-                eventData.latencyMs());
+                    return ServerResponse.status(HttpStatus.valueOf(statusCode.value()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(responseBody);
+                });
 
-            log.debug("Non-streaming completed: keyAlias={}, traceId={}, anthropicRequestId={}, messageId={}",
-                keyAlias, traceId, anthropicRequestId, eventData.messageId());
-
-            return ServerResponse.status(HttpStatus.valueOf(statusCode))
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(responseBody);
-
-        } catch (IOException e) {
-            log.error("IO error during non-streaming request: {}", e.getMessage(), e);
-            return buildErrorResponse(e.getMessage(), startTime, keyAlias, traceId, subject);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Non-streaming request interrupted: {}", e.getMessage());
-            return buildErrorResponse("Request interrupted", startTime, keyAlias, traceId, subject);
         } catch (Exception e) {
             log.error("Unexpected error during non-streaming request: {}", e.getMessage(), e);
             return buildErrorResponse(e.getMessage(), startTime, keyAlias, traceId, subject);

@@ -2,25 +2,24 @@ package io.github.samzhu.gate.handler;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.function.ServerResponse;
 
 import io.micrometer.tracing.Tracer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import io.github.samzhu.gate.config.AnthropicProperties;
+import io.github.samzhu.gate.config.AnthropicProperties; // 用於建構子中取得 baseUrl
 import io.github.samzhu.gate.model.UsageEventData;
 import io.github.samzhu.gate.service.UsageEventPublisher;
 import io.github.samzhu.gate.util.SseParser;
@@ -53,23 +52,36 @@ public class StreamingProxyHandler {
 
     private static final Logger log = LoggerFactory.getLogger(StreamingProxyHandler.class);
 
-    private final AnthropicProperties anthropicProperties;
     private final UsageEventPublisher usageEventPublisher;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private final RestClient restClient;
     private final Tracer tracer;
 
+    /**
+     * 建構子
+     *
+     * <p>重要：使用 Spring 自動配置的 {@code RestClient.Builder} 來建立 {@code RestClient}，
+     * 這樣才能自動啟用 Tracing 功能（Trace Context 傳播、子 Span 建立）。
+     *
+     * @param anthropicProperties Anthropic API 配置
+     * @param usageEventPublisher 用量事件發布器
+     * @param objectMapper JSON 物件映射器
+     * @param restClientBuilder Spring 自動配置的 RestClient.Builder（已包含 Tracing instrumentation）
+     * @param tracer Micrometer Tracer
+     * @see <a href="https://docs.spring.io/spring-boot/reference/actuator/tracing.html">Spring Boot Tracing</a>
+     */
     public StreamingProxyHandler(
             AnthropicProperties anthropicProperties,
             UsageEventPublisher usageEventPublisher,
             ObjectMapper objectMapper,
+            RestClient.Builder restClientBuilder,
             Tracer tracer) {
-        this.anthropicProperties = anthropicProperties;
         this.usageEventPublisher = usageEventPublisher;
         this.objectMapper = objectMapper;
         this.tracer = tracer;
-        this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
+        // 使用 Spring 自動配置的 Builder，確保 Tracing 自動傳播
+        this.restClient = restClientBuilder
+            .baseUrl(anthropicProperties.baseUrl())
             .build();
     }
 
@@ -102,140 +114,139 @@ public class StreamingProxyHandler {
                                Map<String, String> anthropicHeaders) {
         TokenExtractor tokenExtractor = new TokenExtractor();
         SseParser sseParser = new SseParser(objectMapper);
-        String status = "success";
-        String anthropicRequestId = null;
+        final String[] status = {"success"};
+        final String[] anthropicRequestId = {null};
 
         try {
-            URI uri = URI.create(anthropicProperties.baseUrl() + "/v1/messages");
-
-            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                .uri(uri)
-                .header("Content-Type", "application/json")
+            // 建立 RestClient 請求
+            RestClient.RequestBodySpec requestSpec = restClient.post()
+                .uri("/v1/messages")
+                .contentType(MediaType.APPLICATION_JSON)
                 .header("x-api-key", apiKey);
 
             // 設定預設 anthropic-version（如果客戶端沒有提供）
             if (!anthropicHeaders.containsKey("anthropic-version")) {
-                requestBuilder.header("anthropic-version", "2023-06-01");
+                requestSpec.header("anthropic-version", "2023-06-01");
             }
 
             // 透明轉發所有 anthropic-* headers
             for (Map.Entry<String, String> entry : anthropicHeaders.entrySet()) {
-                requestBuilder.header(entry.getKey(), entry.getValue());
+                requestSpec.header(entry.getKey(), entry.getValue());
             }
 
-            HttpRequest request = requestBuilder
-                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                .build();
+            // 使用 exchange() 方法來取得 InputStream，這樣可以處理串流回應
+            // exchange() 會自動傳播 Trace Context 並建立子 Span
+            requestSpec.body(requestBody)
+                .exchange((request, response) -> {
+                    try {
+                        // 從回應 header 提取 Anthropic request-id
+                        anthropicRequestId[0] = response.getHeaders().getFirst("request-id");
+                        HttpStatusCode statusCode = response.getStatusCode();
 
-            HttpResponse<java.io.InputStream> response = httpClient.send(
-                request,
-                HttpResponse.BodyHandlers.ofInputStream()
-            );
-
-            // 從回應 header 提取 Anthropic request-id
-            anthropicRequestId = response.headers()
-                .firstValue("request-id")
-                .orElse(null);
-
-            if (response.statusCode() != 200) {
-                String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
-                log.error("Upstream error: status={}, body={}, anthropicRequestId={}",
-                    response.statusCode(), errorBody, anthropicRequestId);
-                sseBuilder.data(errorBody);
-                sseBuilder.complete();
-                status = "error";
-                publishUsageEvent(tokenExtractor, status, keyAlias, traceId, anthropicRequestId, subject);
-                return;
-            }
-
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
-
-                String line;
-                StringBuilder eventBuilder = new StringBuilder();
-                String currentEventType = null;
-
-                while ((line = reader.readLine()) != null) {
-                    if (line.isEmpty()) {
-                        // 空行表示事件結束，發送累積的事件
-                        if (eventBuilder.length() > 0) {
-                            String eventData = eventBuilder.toString();
-
-                            // 解析並提取 Token 用量
-                            String dataContent = sseParser.extractData(eventData);
-                            if (dataContent != null) {
-                                var streamEvent = sseParser.parse(dataContent);
-                                if (streamEvent != null) {
-                                    tokenExtractor.processEvent(streamEvent);
-                                }
+                        if (!statusCode.is2xxSuccessful()) {
+                            try (InputStream errorStream = response.getBody()) {
+                                String errorBody = new String(errorStream.readAllBytes(), StandardCharsets.UTF_8);
+                                log.error("Upstream error: status={}, body={}, anthropicRequestId={}",
+                                    statusCode.value(), errorBody, anthropicRequestId[0]);
+                                sseBuilder.data(errorBody);
+                                sseBuilder.complete();
+                                status[0] = "error";
                             }
-
-                            // 轉發原始事件給客戶端
-                            if (currentEventType != null && dataContent != null) {
-                                sseBuilder.event(currentEventType);
-                                sseBuilder.data(dataContent);
-                            } else if (dataContent != null) {
-                                sseBuilder.data(dataContent);
-                            }
-
-                            eventBuilder.setLength(0);
-                            currentEventType = null;
+                            return null;
                         }
-                        continue;
-                    }
 
-                    if (line.startsWith("event:")) {
-                        currentEventType = line.substring(6).trim();
-                    } else if (line.startsWith("data:")) {
-                        if (eventBuilder.length() > 0) {
-                            eventBuilder.append("\n");
+                        // 處理成功的串流回應
+                        processStreamResponse(response.getBody(), sseBuilder, sseParser, tokenExtractor);
+                        return null;
+                    } catch (AsyncRequestNotUsableException e) {
+                        // 客戶端提前斷開連接
+                        log.warn("Client disconnected during streaming: {} (this is common for long LLM responses)",
+                            e.getMessage());
+                        status[0] = "client_disconnected";
+                        return null;
+                    } catch (IOException e) {
+                        if (isClientDisconnectedException(e)) {
+                            log.warn("Client disconnected (Broken pipe) during streaming: {}", e.getMessage());
+                            status[0] = "client_disconnected";
+                        } else {
+                            log.error("IO error during streaming: {}", e.getMessage(), e);
+                            status[0] = "error";
+                            try {
+                                sseBuilder.error(e);
+                            } catch (Exception ignored) {}
                         }
-                        eventBuilder.append(line);
+                        return null;
                     }
-                }
-
-                sseBuilder.complete();
-            }
-        } catch (AsyncRequestNotUsableException e) {
-            // 客戶端提前斷開連接（如用戶取消、網路中斷、客戶端超時）
-            // 這是 LLM 長回應場景下的常見情況，記錄為 WARN 而非 ERROR
-            log.warn("Client disconnected during streaming: {} (this is common for long LLM responses)",
-                e.getMessage());
-            status = "client_disconnected";
-            // 不調用 sseBuilder.error()，因為連接已經關閉
-        } catch (IOException e) {
-            // 檢查是否為客戶端斷開導致的 Broken pipe
-            if (isClientDisconnectedException(e)) {
-                log.warn("Client disconnected (Broken pipe) during streaming: {}", e.getMessage());
-                status = "client_disconnected";
-            } else {
-                log.error("IO error during streaming: {}", e.getMessage(), e);
-                status = "error";
-                try {
-                    sseBuilder.error(e);
-                } catch (Exception ignored) {}
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Streaming interrupted: {}", e.getMessage());
-            status = "error";
-            try {
-                sseBuilder.error(e);
-            } catch (Exception ignored) {}
+                });
         } catch (Exception e) {
             // 檢查根本原因是否為客戶端斷開
             if (isClientDisconnectedException(e)) {
                 log.warn("Client disconnected during streaming: {}", e.getMessage());
-                status = "client_disconnected";
+                status[0] = "client_disconnected";
             } else {
                 log.error("Unexpected error during streaming: {}", e.getMessage(), e);
-                status = "error";
+                status[0] = "error";
                 try {
                     sseBuilder.error(e);
                 } catch (Exception ignored) {}
             }
         } finally {
-            publishUsageEvent(tokenExtractor, status, keyAlias, traceId, anthropicRequestId, subject);
+            publishUsageEvent(tokenExtractor, status[0], keyAlias, traceId, anthropicRequestId[0], subject);
+        }
+    }
+
+    /**
+     * 處理串流回應的內部方法
+     */
+    private void processStreamResponse(InputStream inputStream, ServerResponse.SseBuilder sseBuilder,
+                                        SseParser sseParser, TokenExtractor tokenExtractor) throws IOException {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
+
+            String line;
+            StringBuilder eventBuilder = new StringBuilder();
+            String currentEventType = null;
+
+            while ((line = reader.readLine()) != null) {
+                if (line.isEmpty()) {
+                    // 空行表示事件結束，發送累積的事件
+                    if (eventBuilder.length() > 0) {
+                        String eventData = eventBuilder.toString();
+
+                        // 解析並提取 Token 用量
+                        String dataContent = sseParser.extractData(eventData);
+                        if (dataContent != null) {
+                            var streamEvent = sseParser.parse(dataContent);
+                            if (streamEvent != null) {
+                                tokenExtractor.processEvent(streamEvent);
+                            }
+                        }
+
+                        // 轉發原始事件給客戶端
+                        if (currentEventType != null && dataContent != null) {
+                            sseBuilder.event(currentEventType);
+                            sseBuilder.data(dataContent);
+                        } else if (dataContent != null) {
+                            sseBuilder.data(dataContent);
+                        }
+
+                        eventBuilder.setLength(0);
+                        currentEventType = null;
+                    }
+                    continue;
+                }
+
+                if (line.startsWith("event:")) {
+                    currentEventType = line.substring(6).trim();
+                } else if (line.startsWith("data:")) {
+                    if (eventBuilder.length() > 0) {
+                        eventBuilder.append("\n");
+                    }
+                    eventBuilder.append(line);
+                }
+            }
+
+            sseBuilder.complete();
         }
     }
 

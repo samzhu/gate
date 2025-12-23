@@ -41,13 +41,56 @@ spring:
         webmvc:
           enabled: true
     # Spring Cloud Stream 配置
-    # Topic 名稱固定為 llm-gateway-usage
     # Binary Mode: CloudEvents 屬性在 message attributes，data 在 body
     stream:
       bindings:
+        # API 用量事件（Gate 代理 Anthropic API 的用量）
         usageEvent-out-0:
           destination: llm-gateway-usage
           content-type: application/json
+
+# =============================================================================
+# 伺服器配置
+# =============================================================================
+# server:
+#   # HTTP 回應壓縮
+#   # 注意：不壓縮 text/event-stream！
+#   # SSE 串流需要即時送達，壓縮會造成緩衝延遲
+#   # 參考: https://github.com/eclipse-ee4j/jersey/issues/3809
+#   compression:
+#     enabled: true
+#     # 只壓縮非串流回應（不包含 text/event-stream）
+#     mime-types: application/json,text/plain,text/html
+#     min-response-size: 1024
+
+  # Tomcat 配置（配合 Cloud Run containerConcurrency）
+  # 計算公式參考：
+  #   max-connections = containerConcurrency × 2
+  #   accept-count = containerConcurrency × 0.5
+  # 參考: https://docs.cloud.google.com/run/docs/about-concurrency
+  tomcat:
+    # 最大連線數 = containerConcurrency(80) × 2 = 160
+    # 留 buffer 處理 Keep-Alive 連線和過渡期
+    max-connections: 160
+    # 等待佇列 = containerConcurrency(80) × 0.5 = 40
+    # Cloud Run 會自動擴展，不需要大量佇列
+    accept-count: 40
+    # 連線超時（毫秒）：客戶端建立 TCP 連線的超時
+    connection-timeout: 30000
+    # Keep-Alive 超時（毫秒）：閒置連線保持時間
+    keep-alive-timeout: 60000
+    # 注意：Virtual Threads 啟用後，maxThreads 由 VirtualThreadPerTaskExecutor 管理
+    # 不需要手動設定 server.tomcat.threads.max
+
+# =============================================================================
+# RestClient / HTTP Client 配置
+# =============================================================================
+spring.http.client:
+  # 連線超時：建立 TCP 連線的最大等待時間
+  connect-timeout: 10s
+  # 讀取超時：等待回應資料的最大時間
+  # LLM 串流回應可能很長，設定較長的超時
+  read-timeout: 600s
 
 # Anthropic API 配置
 anthropic:
@@ -56,15 +99,22 @@ anthropic:
     keys: []
 
 # Resilience4j 配置
+# 注意：LLM API 呼叫時間較長，需調整超時閾值
 resilience4j:
   circuitbreaker:
     instances:
       anthropic-api:
+        # 失敗率達 50% 時觸發熔斷
         failure-rate-threshold: 50
-        slow-call-rate-threshold: 100
-        slow-call-duration-threshold: 30s
+        # 慢呼叫率達 80% 時觸發熔斷
+        slow-call-rate-threshold: 80
+        # LLM 串流回應可能需要數分鐘，設定 5 分鐘為慢呼叫閾值
+        slow-call-duration-threshold: 300s
+        # 熔斷器開啟後等待 60 秒再嘗試
         wait-duration-in-open-state: 60s
+        # 半開狀態允許 10 個請求通過測試
         permitted-number-of-calls-in-half-open-state: 10
+        # 滑動視窗大小
         sliding-window-size: 100
         sliding-window-type: COUNT_BASED
 

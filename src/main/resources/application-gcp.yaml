@@ -41,6 +41,22 @@ spring:
         pubsub:
           type: pubsub
 
+# =============================================================================
+# 日誌配置 (OTLP 模式)
+# =============================================================================
+# 日誌透過 OTLP 發送到 OTel Collector Sidecar，由 Collector 導出到 Cloud Logging
+# 不使用 console JSON 格式，避免日誌重複（Cloud Run 會自動擷取 stdout）
+#
+# 日誌流向：
+#   App (OTLP) → OTel Collector → googlecloud exporter → Cloud Logging
+#
+# OTel Collector 的 googlecloud exporter 會自動：
+#   - 轉換 severity 為 GCP 格式
+#   - 關聯 trace/span ID
+#   - 設定正確的 resource labels
+#
+# 參考: https://cloud.google.com/stackdriver/docs/instrumentation/opentelemetry-collector-cloud-run
+
 # GCP 環境 OTLP 配置
 # 發送到 Sidecar Collector (localhost)，由 Collector 導出到 GCP 服務
 management:

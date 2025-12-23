@@ -16,7 +16,7 @@ import io.github.samzhu.gate.model.UsageEventData;
  *
  * <p>反射類別（Jackson 序列化/反序列化）：
  * <ul>
- *   <li>{@link UsageEventData} - CloudEvents payload</li>
+ *   <li>{@link UsageEventData} - API 用量 CloudEvents payload</li>
  *   <li>{@link StreamEvent} - SSE 事件解析</li>
  * </ul>
  *
@@ -31,7 +31,7 @@ import io.github.samzhu.gate.model.UsageEventData;
 @Configuration
 @ImportRuntimeHints(NativeImageHints.JodaTimeResourcesHints.class)
 @RegisterReflectionForBinding({
-    // CloudEvents payload
+    // CloudEvents payload - API usage
     UsageEventData.class,
     UsageEventData.Builder.class,
     // SSE Stream parsing

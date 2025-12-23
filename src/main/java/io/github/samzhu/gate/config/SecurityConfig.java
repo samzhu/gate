@@ -22,6 +22,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * <p>端點權限：
  * <ul>
  *   <li>{@code /actuator/**} - 公開存取（健康檢查、指標）</li>
+ *   <li>{@code /api/event_logging/batch} - 公開存取（Anthropic 1P 遙測 stub）</li>
  *   <li>其他端點 - 需要有效 JWT Token</li>
  * </ul>
  *
@@ -51,6 +52,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Actuator 端點公開
                 .requestMatchers("/actuator/**").permitAll()
+                // Anthropic 1P 遙測 stub 公開（Claude Code 自動發送）
+                .requestMatchers("/api/event_logging/batch").permitAll()
                 // 其他所有請求需要認證
                 .anyRequest().authenticated()
             )
