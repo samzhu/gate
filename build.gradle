@@ -38,6 +38,9 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-json'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+	// OTLP Tracing 導出 - 將 traces 發送到 OTel Collector
+	// 參考: https://docs.spring.io/spring-boot/reference/actuator/tracing.html
+	runtimeOnly 'io.opentelemetry:opentelemetry-exporter-otlp'
 	implementation 'org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j'
 	implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webmvc'
 	implementation 'org.springframework.cloud:spring-cloud-stream'
@@ -73,6 +76,21 @@ dependencyManagement {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+// Native Image 配置
+// 增加超時時間避免下載 Liberica NIK 時失敗
+// 參考: https://github.com/paketo-buildpacks/bellsoft-liberica/issues/756
+tasks.named('bootBuildImage') {
+	environment = [
+		'BP_JVM_VERSION': '25',
+		// 增加 HTTP 回應標頭超時（預設 5 秒太短）
+		'BP_RESPONSE_HEADER_TIMEOUT': '60',
+		// 增加 TLS 握手超時
+		'BP_TLS_HANDSHAKE_TIMEOUT': '30',
+		// 增加連線超時
+		'BP_DIALER_TIMEOUT': '30'
+	]
 }
 
 
