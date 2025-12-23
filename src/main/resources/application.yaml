@@ -17,10 +17,6 @@ spring:
   threads:
     virtual:
       enabled: true
-  # 啟用 @Observed 註解支援（預先配置，確保專案一致性）
-  observations:
-    annotations:
-      enabled: true
   security:
     oauth2:
       resourceserver:
@@ -134,13 +130,19 @@ management:
       enabled: true
     readinessstate:
       enabled: true
-  # OpenTelemetry 配置 (Spring Boot 4.0)
+  # OpenTelemetry 配置 (Spring Boot 3.5)
   # 取樣率由環境 profile 控制 (lab=1.0, prod=0.1)
   # 本地開發: Docker Compose 自動偵測 grafana-lgtm 容器並配置 OTLP 端點
   # 部署環境: 設定業界標準環境變數 OTEL_EXPORTER_OTLP_ENDPOINT
   tracing:
     sampling:
       probability: 1.0
+  # 啟用 @Observed 等 Micrometer 註解支援
+  # 需要 spring-boot-starter-aop 在 classpath
+  # 參考: https://docs.spring.io/spring-boot/reference/actuator/observability.html
+  observations:
+    annotations:
+      enabled: true
 
 logging:
   level:

@@ -59,6 +59,7 @@ spring:
 
 # GCP 環境 OTLP 配置
 # 發送到 Sidecar Collector (localhost)，由 Collector 導出到 GCP 服務
+# 注意：endpoint 不要加 /v1/traces，exporter 會自動加上
 management:
   health:
     # 停用 RabbitMQ 健康檢查 (GCP 使用 Pub/Sub，不需要 RabbitMQ)
@@ -68,12 +69,15 @@ management:
     tracing:
       export:
         otlp:
-          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+          # HTTP OTLP endpoint (不含路徑，exporter 會自動加 /v1/traces)
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
     logging:
       export:
         otlp:
-          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+          # HTTP OTLP endpoint (不含路徑，exporter 會自動加 /v1/logs)
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
   otlp:
     metrics:
       export:
-        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        # Metrics endpoint (不含路徑)
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
