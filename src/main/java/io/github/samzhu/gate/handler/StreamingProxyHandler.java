@@ -104,8 +104,20 @@ public class StreamingProxyHandler {
 
         String traceId = getCurrentTraceId();
 
+        // 捕獲當前 span，SSE callback 會在不同 thread 執行，需要手動傳播 trace context
+        // 參考: https://github.com/micrometer-metrics/context-propagation
+        var currentSpan = tracer.currentSpan();
+
         return ServerResponse.sse(sseBuilder -> {
-            processStream(sseBuilder, requestBody, apiKey, subject, keyAlias, traceId, anthropicHeaders);
+            // 在 SSE callback thread 中恢復 trace context
+            // 這樣 RestClient 呼叫才能建立正確的子 span
+            if (currentSpan != null) {
+                try (var ignored = tracer.withSpan(currentSpan)) {
+                    processStream(sseBuilder, requestBody, apiKey, subject, keyAlias, traceId, anthropicHeaders);
+                }
+            } else {
+                processStream(sseBuilder, requestBody, apiKey, subject, keyAlias, traceId, anthropicHeaders);
+            }
         });
     }
 
