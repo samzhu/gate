@@ -57,9 +57,19 @@ spring:
 #
 # 參考: https://cloud.google.com/stackdriver/docs/instrumentation/opentelemetry-collector-cloud-run
 
+# =============================================================================
 # GCP 環境 OTLP 配置
+# =============================================================================
 # 發送到 Sidecar Collector (localhost)，由 Collector 導出到 GCP 服務
-# 注意：endpoint 不要加 /v1/traces，exporter 會自動加上
+#
+# 路徑處理差異 (Spring Boot 3.5.x):
+#   - Tracing/Logging: 使用 OpenTelemetry SDK，會自動加 /v1/traces, /v1/logs
+#   - Metrics: 使用 Micrometer OtlpMeterRegistry，需要完整路徑 /v1/metrics
+#
+# 參考:
+#   - https://docs.spring.io/spring-boot/reference/actuator/metrics.html
+#   - https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/
+# =============================================================================
 management:
   health:
     # 停用 RabbitMQ 健康檢查 (GCP 使用 Pub/Sub，不需要 RabbitMQ)
@@ -69,15 +79,18 @@ management:
     tracing:
       export:
         otlp:
-          # HTTP OTLP endpoint (不含路徑，exporter 會自動加 /v1/traces)
+          # OpenTelemetry SDK - 自動加 /v1/traces
           endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
     logging:
       export:
         otlp:
-          # HTTP OTLP endpoint (不含路徑，exporter 會自動加 /v1/logs)
+          # OpenTelemetry SDK - 自動加 /v1/logs
           endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
   otlp:
     metrics:
       export:
-        # Metrics endpoint (不含路徑)
-        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
+        # Micrometer OtlpMeterRegistry - 需要完整路徑
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+        # 縮短 timeout，避免 shutdown 時長時間等待
+        connect-timeout: 2s
+        read-timeout: 5s
